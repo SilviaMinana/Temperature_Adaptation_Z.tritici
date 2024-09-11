@@ -1,0 +1,683 @@
+---
+title: "Analysis of the overlap between significant variants associated with thermal adaptation in a worldwide collection of *Zymoseptoria tritici* and previously identified QTL's for thermal adaptation, and SNPeff results display of "
+author: "Silvia Minana-Posada"
+date: "2024-02-02"
+output:
+  rmdformats::robobook:
+    self_contained: true
+    number_sections: true
+    highlight: pygments
+    bibliography: references.bib
+bibliography: references.bib
+---
+
+# Load packages
+
+```{r message=FALSE, error=FALSE, warning=FALSE}
+
+library(readr)
+library(RColorBrewer)
+library(ggplot2)
+library(purrr)
+library(stringr)
+library(forcats)
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(circlize)
+
+
+```
+
+# Overlap of genetic regions associated with the growth variables at 5 temperature conditions of the worldwide collection of *Z. tritici* and the previously identified QTLs associated with thermal adaptation
+
+With crosses of 4 Swiss strains, 17 QTLs were identified associated with growth at a cold and a near optimum temperatures and temperature sensitivity [@lendenmann2016] . Here there are lists of significant variants associated with growth variables at the different temperature conditions used in our study that overlap with previously identified QTLs.
+
+### Lendenmann QTL --\> GWAS 12ºC WWC
+
+```{r message=FALSE, error=FALSE, warning=FALSE}
+
+
+
+lendenmannannotfromalice<-read.csv("QTLfromAlicepaper_SMP_02022024.csv", header=TRUE, sep= ",")  %>% rename(chromosome=QTL_CHR, Phenotype2=Phenotype)
+
+alicegea<-read_csv("alicegeagenes.csv")
+
+
+totalsub5<- read_tsv("Significant_GEMMA_12C_temperatureswithphen_fdr0.1_v1.tsv", col_names = c("chromosome", "BP", "Phenotype"))
+
+chromis5<-unique(totalsub5$chromosome)
+phenops5<-unique(totalsub5$Phenotype)
+
+
+for (chrm in chromis5){
+  for (ph in phenops5){
+    signiftem5=totalsub5 %>% filter(chromosome == chrm) %>% filter(Phenotype == ph) %>% group_by(chromosome, Phenotype)
+    lendatemp=lendenmannannotfromalice %>% filter(chromosome == chrm) 
+    tempi35=left_join(signiftem5, lendatemp) %>% mutate(lendafound= ifelse(QTL_start <= BP & QTL_end >= BP, "yes", "no:("))
+    tempi35$lendafound<-as.character(tempi35$lendafound)
+    if (exists("tempi45_12c") == FALSE) {
+            tempi45_12c=tempi35
+          } else {
+            tempi45_12c=full_join(tempi45_12c, tempi35)
+          }
+  }
+}
+
+tempi45_12c %>% filter(lendafound == "yes") 
+
+#write_csv(tempi45 %>% filter(lendafound == "yes"), "GWAS12C_WWC_lendenmannannotfromalice_notpeak_notbygenes_v2.csv")
+
+for (chrm in chromis5){
+  for (ph in phenops5){
+    signiftem5=totalsub5 %>% filter(chromosome == chrm) %>% filter(Phenotype == ph) %>% group_by(chromosome, Phenotype)
+    geatemp=alicegea %>% filter(chromosome == chrm) 
+    tempige=left_join(signiftem5, geatemp) %>% mutate(geafound= ifelse(start-2800 <= BP & end+2800 >= BP, "yes", "no:("))
+    tempige$geafound<-as.character(tempige$geafound)
+    if (exists("tempigea_12c") == FALSE) {
+            tempigea_12c=tempige
+          } else {
+            tempigea_12c=full_join(tempigea_12c, tempige)
+          }
+  }
+}
+
+tempigea_12c %>% filter(geafound == "yes") 
+
+
+#write_csv(tempigea_12c %>% filter(geafound == "yes"), "GWAS12C_WWC_GEAannotfromalice_bygenes_v1.csv")
+
+
+
+```
+
+### Lendenmann QTL --\> GWAS 15ºC WWC
+
+```{r message=FALSE, error=FALSE, warning=FALSE}
+
+
+
+lendenmannannotfromalice<-read.csv("QTLfromAlicepaper_SMP_02022024.csv", header=TRUE, sep= ",")  %>% rename(chromosome=QTL_CHR, Phenotype2=Phenotype)
+
+
+alicegea<-read_csv("alicegeagenes.csv")
+
+totalsub5<-read_tsv("Significant_GEMMA_15C_temperatureswithphen_fdr0.1_v1.tsv", col_names = c("chromosome", "BP", "Phenotype"))
+
+chromis5<-unique(totalsub5$chromosome)
+phenops5<-unique(totalsub5$Phenotype)
+
+
+for (chrm in chromis5){
+  for (ph in phenops5){
+    signiftem5=totalsub5 %>% filter(chromosome == chrm) %>% filter(Phenotype == ph) %>% group_by(chromosome, Phenotype)
+    lendatemp=lendenmannannotfromalice %>% filter(chromosome == chrm) 
+    tempi35=left_join(signiftem5, lendatemp) %>% mutate(lendafound= ifelse(QTL_start <= BP & QTL_end >= BP, "yes", "no:("))
+    tempi35$lendafound<-as.character(tempi35$lendafound)
+    if (exists("tempi45_15c") == FALSE) {
+            tempi45_15c=tempi35
+          } else {
+            tempi45_15c=full_join(tempi45_15c, tempi35)
+          }
+  }
+}
+
+tempi45_15c %>% filter(lendafound == "yes") 
+
+#write_csv(tempi45_15c %>% filter(lendafound == "yes"), "GWAS15C_WWC_lendenmannannotfromalice_notpeak_notbygenes_v2.csv")
+
+
+
+for (chrm in chromis5){
+  for (ph in phenops5){
+    signiftem5=totalsub5 %>% filter(chromosome == chrm) %>% filter(Phenotype == ph) %>% group_by(chromosome, Phenotype)
+    geatemp=alicegea %>% filter(chromosome == chrm) 
+    tempige=left_join(signiftem5, geatemp) %>% mutate(geafound= ifelse(start-2800 <= BP & end+2800 >= BP, "yes", "no:("))
+    tempige$geafound<-as.character(tempige$geafound)
+    if (exists("tempigea_15c") == FALSE) {
+            tempigea_15c=tempige
+          } else {
+            tempigea_15c=full_join(tempigea_15c, tempige)
+          }
+  }
+}
+
+tempigea_15c %>% filter(geafound == "yes") 
+
+
+#write_csv(tempigea_15c %>% filter(geafound == "yes"), "GWAS15C_WWC_GEAannotfromalice_bygenes_v1.csv")
+
+```
+
+### Lendenmann QTL --\> GWAS 18ºC WWC
+
+```{r message=FALSE, error=FALSE, warning=FALSE}
+
+
+
+lendenmannannotfromalice<-read.csv("QTLfromAlicepaper_SMP_02022024.csv", header=TRUE, sep= ",")  %>% rename(chromosome=QTL_CHR, Phenotype2=Phenotype)
+
+
+alicegea<-read_csv("alicegeagenes.csv")
+
+totalsub5<-read_tsv("Significant_GEMMA_18C_temperatureswithphen_fdr0.1_v1.tsv", col_names = c("chromosome", "BP", "Phenotype"))
+
+chromis5<-unique(totalsub5$chromosome)
+phenops5<-unique(totalsub5$Phenotype)
+
+
+for (chrm in chromis5){
+  for (ph in phenops5){
+    signiftem5=totalsub5 %>% filter(chromosome == chrm) %>% filter(Phenotype == ph) %>% group_by(chromosome, Phenotype)
+    lendatemp=lendenmannannotfromalice %>% filter(chromosome == chrm) 
+    tempi35=left_join(signiftem5, lendatemp) %>% mutate(lendafound= ifelse(QTL_start <= BP & QTL_end >= BP, "yes", "no:("))
+    tempi35$lendafound<-as.character(tempi35$lendafound)
+    if (exists("tempi45_18c") == FALSE) {
+            tempi45_18c=tempi35
+          } else {
+            tempi45_18c=full_join(tempi45_18c, tempi35)
+          }
+  }
+}
+
+tempi45_18c %>% filter(lendafound == "yes") 
+
+#write_csv(tempi45_18c %>% filter(lendafound == "yes"), "GWAS18C_WWC_lendenmannannotfromalice_notpeak_notbygenes_v2.csv")
+
+
+
+
+for (chrm in chromis5){
+  for (ph in phenops5){
+    signiftem5=totalsub5 %>% filter(chromosome == chrm) %>% filter(Phenotype == ph) %>% group_by(chromosome, Phenotype)
+    geatemp=alicegea %>% filter(chromosome == chrm) 
+    tempige=left_join(signiftem5, geatemp) %>% mutate(geafound= ifelse(start-2800 <= BP & end+2800 >= BP, "yes", "no:("))
+    tempige$geafound<-as.character(tempige$geafound)
+    if (exists("tempigea_18c") == FALSE) {
+            tempigea_18c=tempige
+          } else {
+            tempigea_18c=full_join(tempigea_18c, tempige)
+          }
+  }
+}
+
+tempigea_18c %>% filter(geafound == "yes") 
+
+
+#write_csv(tempigea_18c %>% filter(geafound == "yes"), "GWAS18C_WWC_GEAannotfromalice_bygenes_v1.csv")
+
+
+
+```
+
+### Lendenmann QTL --\> GWAS 22ºC WWC
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+
+
+lendenmannannotfromalice<-read.csv("QTLfromAlicepaper_SMP_02022024.csv", header=TRUE, sep= ",")  %>% rename(chromosome=QTL_CHR, Phenotype2=Phenotype)
+
+
+alicegea<-read_csv("alicegeagenes.csv")
+
+totalsub5<-read_tsv("Significant_GEMMA_22C_temperatureswithphen_fdr0.1_v1.tsv", col_names = c("chromosome", "BP", "Phenotype"))
+
+chromis5<-unique(totalsub5$chromosome)
+phenops5<-unique(totalsub5$Phenotype)
+
+
+for (chrm in chromis5){
+  for (ph in phenops5){
+    signiftem5=totalsub5 %>% filter(chromosome == chrm) %>% filter(Phenotype == ph) %>% group_by(chromosome, Phenotype)
+    lendatemp=lendenmannannotfromalice %>% filter(chromosome == chrm) 
+    tempi35=left_join(signiftem5, lendatemp) %>% mutate(lendafound= ifelse(QTL_start <= BP & QTL_end >= BP, "yes", "no:("))
+    tempi35$lendafound<-as.character(tempi35$lendafound)
+    if (exists("tempi45_22c") == FALSE) {
+            tempi45_22c=tempi35
+          } else {
+            tempi45_22c=full_join(tempi45_22c, tempi35)
+          }
+  }
+}
+
+tempi45_22c %>% filter(lendafound == "yes") 
+
+#write_csv(tempi45_22c %>% filter(lendafound == "yes"), "GWAS22C_WWC_lendenmannannotfromalice_notpeak_notbygenes_v2.csv")
+
+
+for (chrm in chromis5){
+  for (ph in phenops5){
+    signiftem5=totalsub5 %>% filter(chromosome == chrm) %>% filter(Phenotype == ph) %>% group_by(chromosome, Phenotype)
+    geatemp=alicegea %>% filter(chromosome == chrm) 
+    tempige=left_join(signiftem5, geatemp) %>% mutate(geafound= ifelse(start-2800 <= BP & end+2800 >= BP, "yes", "no:("))
+    tempige$geafound<-as.character(tempige$geafound)
+    if (exists("tempigea_22c") == FALSE) {
+            tempigea_22c=tempige
+          } else {
+            tempigea_22c=full_join(tempigea_22c, tempige)
+          }
+  }
+}
+
+tempigea_22c %>% filter(geafound == "yes") 
+
+
+#write_csv(tempigea_22c %>% filter(geafound == "yes"), "GWAS22C_WWC_GEAannotfromalice_bygenes_v1.csv")
+
+```
+
+### Lendenmann QTL --\> GWAS 25ºC WWC
+
+```{r message=FALSE, error=FALSE, warning=FALSE}
+
+
+
+lendenmannannotfromalice<-read.csv("QTLfromAlicepaper_SMP_02022024.csv", header=TRUE, sep= ",")  %>% rename(chromosome=QTL_CHR, Phenotype2=Phenotype)
+
+
+
+alicegea<-read_csv("alicegeagenes.csv")
+
+totalsub5<-read_tsv("Significant_GEMMA_25C_temperatureswithphen_fdr0.1_v1.tsv", col_names = c("chromosome", "BP", "Phenotype"))
+
+chromis5<-unique(totalsub5$chromosome)
+phenops5<-unique(totalsub5$Phenotype)
+
+
+for (chrm in chromis5){
+  for (ph in phenops5){
+    signiftem5=totalsub5 %>% filter(chromosome == chrm) %>% filter(Phenotype == ph) %>% group_by(chromosome, Phenotype)
+    lendatemp=lendenmannannotfromalice %>% filter(chromosome == chrm) 
+    tempi35=left_join(signiftem5, lendatemp) %>% mutate(lendafound= ifelse(QTL_start <= BP & QTL_end >= BP, "yes", "no:("))
+    tempi35$lendafound<-as.character(tempi35$lendafound)
+    if (exists("tempi45_25c") == FALSE) {
+            tempi45_25c=tempi35
+          } else {
+            tempi45_25c=full_join(tempi45_25c, tempi35)
+          }
+  }
+}
+
+tempi45_25c %>% filter(lendafound == "yes") 
+
+#write_csv(tempi45_25c %>% filter(lendafound == "yes"), "GWAS25C_WWC_lendenmannannotfromalice_notpeak_notbygenes_v2.csv")
+
+
+
+for (chrm in chromis5){
+  for (ph in phenops5){
+    signiftem5=totalsub5 %>% filter(chromosome == chrm) %>% filter(Phenotype == ph) %>% group_by(chromosome, Phenotype)
+    geatemp=alicegea %>% filter(chromosome == chrm) 
+    tempige=left_join(signiftem5, geatemp) %>% mutate(geafound= ifelse(start-2800 <= BP & end+2800 >= BP, "yes", "no:("))
+    tempige$geafound<-as.character(tempige$geafound)
+    if (exists("tempigea_25c") == FALSE) {
+            tempigea_25c=tempige
+          } else {
+            tempigea_25c=full_join(tempigea_25c, tempige)
+          }
+  }
+}
+
+tempigea_25c %>% filter(geafound == "yes") %>% mutate(new_start=start-2800, new_end=end+2800)
+
+#write_csv(tempigea_25c %>% ungroup() %>% filter(geafound == "yes") %>% mutate(new_start=start-2800, new_end=end+2800), "GWAS25C_WWC_GEAannotfromalice_bygenes_v1.csv")
+
+```
+
+# Circular plots of significant variables associated with the growth variables at the 5 temperature conditions
+
+```{r message=FALSE, error=FALSE, warning=FALSE}
+
+pheno_table<-read_csv("all_varfin_temp.csv") %>% rename(Condition=cond, Phenotype=coliname)
+
+#significant file here is loci
+
+
+chromosomes_lengths<-read_csv("chromosomelengths.csv")
+
+signif12c<-read_tsv("Significant_GEMMA_12C_temperatureswithphen_fdr0.1_v1.tsv", col_names = c("CHR", "BP", "Phenotype"))
+signif15c<-read_tsv("Significant_GEMMA_15C_temperatureswithphen_fdr0.1_v1.tsv", col_names = c("CHR", "BP", "Phenotype"))
+signif18c<-read_tsv("Significant_GEMMA_18C_temperatureswithphen_fdr0.1_v1.tsv", col_names = c("CHR", "BP", "Phenotype"))
+signif22c<-read_tsv("Significant_GEMMA_22C_temperatureswithphen_fdr0.1_v1.tsv", col_names = c("CHR", "BP", "Phenotype"))
+signif25c<-read_tsv("Significant_GEMMA_25C_temperatureswithphen_fdr0.1_v1.tsv", col_names = c("CHR", "BP", "Phenotype"))
+
+significant<-full_join(signif12c, signif15c) %>% full_join(signif18c) %>% full_join(signif22c) %>% full_join(signif25c)
+
+significantdistinct<-distinct(significant) %>% left_join(pheno_table)
+significantdistinctmergedgenotypes<-distinct(significantdistinct %>% dplyr::select(-Phenotype, -var, -Type, -Condition))
+
+write_tsv(significantdistinctmergedgenotypes, "significantdistinctmergedgenotypes.tsv", col_names = FALSE)
+
+significantdistinctmergedcondition<-distinct(significantdistinct %>% dplyr::select(-Phenotype, -var, -Type))  %>% ungroup() %>% group_by (Condition) %>% count() %>% ungroup() %>% mutate(percent = n/194) 
+
+totalsub12C<-read_csv("totalsub_genes_GWAS_12C_v1.csv")
+totalsub15C<-read_csv("totalsub_genes_GWAS_15C_v1.csv")
+totalsub18C<-read_csv("totalsub_genes_GWAS_18C_v1.csv")
+totalsub22C<-read_csv("totalsub_genes_GWAS_22C_v1.csv")
+totalsub25C<-read_csv("totalsub_genes_GWAS_25C_v1.csv")
+
+totalsub_GWAS_WWC<-totalsub12C %>% full_join(totalsub15C) %>% full_join(totalsub18C) %>% full_join(totalsub22C) %>% full_join(totalsub25C) %>% rename(Gene=gene)
+
+totalnumbgenes<-unique(totalsub_GWAS_WWC$Gene)
+
+totalnumbgenes1<-distinct(totalsub_GWAS_WWC %>% left_join(pheno_table) %>% dplyr::select( Gene, chromosome, start, end, Seq_Description)) %>%
+  drop_na(Seq_Description) %>% # remove NA values 
+  filter(!grepl('unnamed_protein_product', Seq_Description)) %>% # remove unnamed pred. genes
+  filter(!grepl('uncharacterized_protein', Seq_Description)) %>% # remove unnamed pred. genes
+  filter(!grepl('_predicted_protein', Seq_Description)) %>%
+  filter(!grepl('SPQ18253.1_2af7a199-4405-43fb-abde-30e69e36a884', Seq_Description)) %>%
+  filter(!grepl('hypothetical', Seq_Description))
+
+
+#92 
+#154
+
+annotall<-read_csv("annotationsgenefromnewgff3.csv") %>% rename(Gene=gene)
+
+snpeffresultsnew080424<-read_csv("highesteffectlittle.csv", col_names = FALSE)
+names(snpeffresultsnew080424) <- c("variant", "Variant_type", "Effect_strength", "Gene", "CHR", "BP")
+
+snpeffresultsnew080424_1<- snpeffresultsnew080424 %>% left_join(annotall) %>% left_join(significant) %>% left_join(pheno_table)
+write_csv(snpeffresultsnew080424_1, "forpubsnpeffresults.csv")
+
+
+
+highest_positions = significantdistinct %>%
+  group_by(CHR,  Phenotype) %>%
+  dplyr::select(CHROM = CHR, POS = BP, Phenotype) %>%
+  inner_join(., read_tsv(paste0("onlysignificantmafmiss.recode.temperaturesbcftoolsann.ann.tab"), na = ".", col_types = cols(`[1]CHROM`= col_number(), `[2]POS`= col_number())) %>% rename(CHROM=`[1]CHROM`,POS=`[2]POS`, REF=`[3]REF`, ALT=`[4]ALT` , ANN=`[5]ANN`)) %>% dplyr::select(-ANN)%>% 
+  pivot_longer(-c(CHROM, POS, REF, ALT, Phenotype), 
+                 names_to = "ID_file", values_to = "Allele")%>%
+  filter(!is.na(Allele)) %>% mutate(Allele = as.numeric(Allele)) %>%
+  group_by(CHROM, POS, REF, ALT, Phenotype) %>%
+  dplyr::mutate(Nb_ref = sum(Allele == 0),
+                Nb_non_miss = n(),
+                Freq_ref = Nb_ref/Nb_non_miss)
+
+
+snpalleleinforefalt<-highest_positions %>% filter(CHROM == 2) %>% filter(POS == 	
+216652)
+
+
+write_csv(snpalleleinforefalt, "snpalleleinforefalt_chr2_unknown_12C.csv")
+
+temp = full_join(pheno_table, significant) %>% 
+    dplyr::select(Condition, CHR, BP) %>%
+    distinct() %>%
+    arrange(CHR, BP) %>% 
+    inner_join(., chromosomes_lengths) %>%
+    mutate(BPcum = BP + Cumu_start) %>%
+    filter(CHR < 14) %>%
+  mutate(height = 1) %>%
+  dplyr::select(Condition, CHR, BP, height)
+
+
+
+short_chr = filter(chromosomes_lengths, CHR < 14) %>%
+  mutate(x0 = 0) %>%
+  dplyr::select(CHR, x0, Length) %>%
+  add_row(CHR = 0, x0 = 0, Length = 2800000)
+
+
+short_chr$color = c(rep("grey20",13), "white")
+
+
+#add lendenmann qtls where it matches:
+
+ 
+lend22c<-read_csv("GWAS22C_WWC_lendenmannannotfromalice_notpeak_notbygenes_v2.csv")  %>% rename(CHR=chromosome) %>% left_join(snpeffresultsnew080424_1)  
+lend12c<-read_csv("GWAS12C_WWC_lendenmannannotfromalice_notpeak_notbygenes_v2.csv") %>% rename(CHR=chromosome) %>% left_join(snpeffresultsnew080424_1) 
+
+
+
+lend25c<-read_csv("GWAS25C_WWC_lendenmannannotfromalice_notpeak_notbygenes_v2.csv") %>% dplyr::select(chromosome, QTL_start, QTL_end) %>% rename(CHR=chromosome)
+lend22c<-read_csv("GWAS22C_WWC_lendenmannannotfromalice_notpeak_notbygenes_v2.csv") %>% dplyr::select(chromosome, QTL_start, QTL_end) %>% rename(CHR=chromosome)
+lend18c<-read_csv("GWAS18C_WWC_lendenmannannotfromalice_notpeak_notbygenes_v2.csv") %>% dplyr::select(chromosome, QTL_start, QTL_end) %>% rename(CHR=chromosome)
+lend15c<-read_csv("GWAS15C_WWC_lendenmannannotfromalice_notpeak_notbygenes_v2.csv") %>% dplyr::select(chromosome, QTL_start, QTL_end) %>% rename(CHR=chromosome)
+lend12c<-read_csv("GWAS12C_WWC_lendenmannannotfromalice_notpeak_notbygenes_v2.csv") %>% dplyr::select(chromosome, QTL_start, QTL_end) %>% rename(CHR=chromosome)
+
+nofvariantslend12c<-lend12c %>% ungroup() %>% group_by(CHR, QTL_start, QTL_end) %>% count()
+nofvariantslend22c<-lend22c %>% ungroup() %>% group_by(CHR, QTL_start, QTL_end) %>% count()
+
+#Step 1: initialize the plot
+circos.par(track.height = 0.1, gap.degree=5, start.degree = 90, points.overflow.warning = FALSE)
+circos.initialize(sectors = short_chr$CHR, xlim = short_chr[,2:3])
+
+#Step 2: add the chromosomes
+circos.track(ylim=c(0, 1),
+             bg.col=c(rep("grey80",13), "white"), bg.border=F, track.height=0.08, 
+ panel.fun=function(x, y) {
+  chr=CELL_META$sector.index
+  xlim=CELL_META$xlim
+  ylim=CELL_META$ylim
+  circos.text(mean(xlim), mean(ylim), chr, cex=0.8, col=filter(short_chr, CHR == chr)$color, 
+              facing="bending.inside", niceFacing=TRUE)})
+
+#Step 3: add the 12C info
+
+circos.track(ylim = c(0, 1), track.height = 0.1, bg.border = c(rep("grey70",13), "white"), 
+             panel.fun=function(region, value, ...) {
+  chr=CELL_META$sector.index
+  xlim=CELL_META$xlim
+  ylim=CELL_META$ylim
+  
+
+  
+  circos.lines(x= filter(temp, Condition == "12C" & CHR == chr)$BP, 
+               y = filter(temp, Condition == "12C" & CHR == chr)$height, 
+               type="h", col="#74CCED", lwd=2)})
+circos.text(1, .5, "12ºC", facing = "bending.inside", sector.index = "0", cex = 0.5, adj = c(0.05, 0.5))
+
+  pos=circlize(c(5121000, 5621000), c(-0.35, 0.0), sector.index = "1")
+draw.sector(pos[1, "theta"], pos[2, "theta"], pos[1, "rou"], pos[2, "rou"], 
+    clock.wise = TRUE, col = "black", border="grey40")
+  pos=circlize(c(1555000, 2055000), c(-0.35, 0.0), sector.index = "2")
+draw.sector(pos[1, "theta"], pos[2, "theta"], pos[1, "rou"], pos[2, "rou"], 
+    clock.wise = TRUE, col = "black", border="grey40")
+  pos=circlize(c(1178000, 1678000), c(-0.35, 0.0), sector.index = "2")
+draw.sector(pos[1, "theta"], pos[2, "theta"], pos[1, "rou"], pos[2, "rou"], 
+    clock.wise = TRUE, col = "black", border="grey40")
+  pos=circlize(c(1122000, 1622000), c(-0.35, 0.0), sector.index = "2")
+draw.sector(pos[1, "theta"], pos[2, "theta"], pos[1, "rou"], pos[2, "rou"], 
+    clock.wise = TRUE, col = "black", border="grey40")
+  pos=circlize(c(1925000, 2425000), c(-0.35, 0.0), sector.index = "3")
+draw.sector(pos[1, "theta"], pos[2, "theta"], pos[1, "rou"], pos[2, "rou"], 
+    clock.wise = TRUE, col = "black", border="grey40")
+
+
+
+#Step 4: add the 15C info
+circos.track(ylim = c(0, 1), track.height = 0.1, bg.border=c(rep("grey70",13), "white"), 
+             panel.fun=function(region, value, ...) {
+  chr=CELL_META$sector.index
+  xlim=CELL_META$xlim
+  ylim=CELL_META$ylim 
+  
+  circos.lines(x= filter(temp, Condition == "15C" & CHR == chr)$BP, 
+               y = filter(temp, Condition == "15C" & CHR == chr)$height, 
+               type="h", col="#3596B5", lwd=2)})
+
+circos.text(1, .5, "15ºC", facing = "bending.inside", sector.index = "0", cex = 0.5, adj = c(0.05, 0.5))
+
+
+#Step 5: add the 18C info
+circos.track(ylim = c(0, 1), track.height = 0.1, bg.border=c(rep("grey70",13), "white"), 
+             panel.fun=function(region, value, ...) {
+  chr=CELL_META$sector.index
+  xlim=CELL_META$xlim
+  ylim=CELL_META$ylim 
+  
+  circos.lines(x= filter(temp, Condition == "18C" & CHR == chr)$BP, 
+               y = filter(temp, Condition == "18C" & CHR == chr)$height, 
+               type="h", col="#955490", lwd=2)})
+
+circos.text(1, .5, "18ºC", facing = "bending.inside", sector.index = "0", cex = 0.5, adj = c(0, 0.5))
+
+#Step 6: add the 22C info
+circos.track(ylim = c(0, 1), track.height = 0.1, bg.border = c(rep("grey70",13), "white"), 
+             panel.fun=function(region, value, ...) {
+  chr=CELL_META$sector.index
+  xlim=CELL_META$xlim
+  ylim=CELL_META$ylim
+  
+  circos.lines(x= filter(temp, Condition == "22C" & CHR == chr)$BP, 
+               y = filter(temp, Condition == "22C" & CHR == chr)$height, 
+               type="h", col="#F4797D", lwd=2)})
+circos.text(1, .5, "22ºC", facing = "bending.inside", sector.index = "0", cex = 0.5, adj = c(0.05, 0.5))
+
+  pos=circlize(c(938000, 1438000), c(-0.35, 0.0), sector.index = "4")
+draw.sector(pos[1, "theta"], pos[2, "theta"], pos[1, "rou"], pos[2, "rou"], 
+    clock.wise = TRUE, col = "black", border="grey40")
+  pos=circlize(c(1062000, 1562000), c(-0.35, 0.0), sector.index = "4")
+draw.sector(pos[1, "theta"], pos[2, "theta"], pos[1, "rou"], pos[2, "rou"], 
+    clock.wise = TRUE, col = "black", border="grey40")
+
+#Step 7: add the 25C info
+circos.track(ylim = c(0, 1), track.height = 0.1, bg.border = c(rep("grey70",13), "white"), 
+             panel.fun=function(region, value, ...) {
+  chr=CELL_META$sector.index
+  xlim=CELL_META$xlim
+  ylim=CELL_META$ylim
+  
+  circos.lines(x= filter(temp, Condition == "25C" & CHR == chr)$BP, 
+               y = filter(temp, Condition == "25C" & CHR == chr)$height, 
+               type="h", col="#A5333E", lwd=2)})
+circos.text(1, .5, "25ºC", facing = "bending.inside", sector.index = "0", cex = 0.5, adj = c(0.05, 0.5))
+
+  #GEA markers
+  
+ # pos=circlize(c(1504299, 1514464), c(-0.9, 0.0), sector.index = "7")
+#draw.sector(pos[1, "theta"], pos[2, "theta"], pos[1, "rou"], pos[2, "rou"], 
+ #   clock.wise = TRUE, col = "#5e2f0d", border="#5e2f0d")
+  #pos=circlize(c(1207411, 1215216), c(-0.9, 0.0), sector.index = "7")
+#draw.sector(pos[1, "theta"], pos[2, "theta"], pos[1, "rou"], pos[2, "rou"], 
+ #   clock.wise = TRUE, col = "#5e2f0d", border="#5e2f0d")
+
+  pos=circlize(c(1504299, 1511144), c(-0.9, 0.0), sector.index = "7")
+draw.sector(pos[1, "theta"], pos[2, "theta"], pos[1, "rou"], pos[2, "rou"], 
+    clock.wise = TRUE, col = "#5e2f0d", border="#5e2f0d")
+  pos=circlize(c(1505695, 1513466), c(-0.9, 0.0), sector.index = "7")
+draw.sector(pos[1, "theta"], pos[2, "theta"], pos[1, "rou"], pos[2, "rou"], 
+    clock.wise = TRUE, col = "#5e2f0d", border="#5e2f0d")
+  pos=circlize(c(1507820, 1514464), c(-0.9, 0.0), sector.index = "7")
+draw.sector(pos[1, "theta"], pos[2, "theta"], pos[1, "rou"], pos[2, "rou"], 
+    clock.wise = TRUE, col = "#5e2f0d", border="#5e2f0d")
+  pos=circlize(c(1505695, 1513466), c(-0.9, 0.0), sector.index = "7")
+draw.sector(pos[1, "theta"], pos[2, "theta"], pos[1, "rou"], pos[2, "rou"], 
+    clock.wise = TRUE, col = "#5e2f0d", border="#5e2f0d")
+  pos=circlize(c(1507820, 1514464), c(-0.9, 0.0), sector.index = "7")
+draw.sector(pos[1, "theta"], pos[2, "theta"], pos[1, "rou"], pos[2, "rou"], 
+    clock.wise = TRUE, col = "#5e2f0d", border="#5e2f0d")
+  pos=circlize(c(1505695, 1513466), c(-0.9, 0.0), sector.index = "7")
+draw.sector(pos[1, "theta"], pos[2, "theta"], pos[1, "rou"], pos[2, "rou"], 
+    clock.wise = TRUE, col = "#5e2f0d", border="#5e2f0d")
+  pos=circlize(c(1507820, 1514464), c(-0.9, 0.0), sector.index = "7")
+draw.sector(pos[1, "theta"], pos[2, "theta"], pos[1, "rou"], pos[2, "rou"], 
+    clock.wise = TRUE, col = "#5e2f0d", border="#5e2f0d")
+  pos=circlize(c(1207411, 1214000), c(-0.9, 0.0), sector.index = "7")
+draw.sector(pos[1, "theta"], pos[2, "theta"], pos[1, "rou"], pos[2, "rou"], 
+    clock.wise = TRUE, col = "#5e2f0d", border="#5e2f0d")
+  pos=circlize(c(1208740, 1215216), c(-0.9, 0.0), sector.index = "7")
+draw.sector(pos[1, "theta"], pos[2, "theta"], pos[1, "rou"], pos[2, "rou"], 
+    clock.wise = TRUE, col = "#5e2f0d", border="#5e2f0d")
+  pos=circlize(c(95000, 183000), c(-0.35, 0.0), sector.index = "7")
+draw.sector(pos[1, "theta"], pos[2, "theta"], pos[1, "rou"], pos[2, "rou"], 
+    clock.wise = TRUE, col = "#e2a529", border="#e2a529")
+#highlight.sector(c("f", "g"), col = NA, border = "green", 
+ #   lwd = 2, track.index = c(2, 3), padding = c(0.1, 0.1, 0.1, 0.1))
+
+
+
+```
+
+# Number of predicted genes with SNPs with the highest predicted effect of the SNPs associated
+
+The SNPeff [@cingolani2012] results were obtained by using the script snpeffbuildwithnewannotationandrun.sh that can be found in my Github page. For further information on the impact and effect categories can be found in the SNPeff website <https://pcingola.github.io/SnpEff/snpeff/inputoutput/> where the authors describe the effect (sequence ontology) and the effect's impact.
+
+```{r message=FALSE, error=FALSE, warning=FALSE, fig.height=7}
+
+pheno_table<-read_csv("all_varfin_temp.csv") %>% rename(Condition=cond, Phenotype=coliname)
+
+
+annotall<-read_csv("annotationsgenefromnewgff3.csv") %>% rename(Gene=gene)
+
+signif12c<-read_tsv("Significant_GEMMA_12C_temperatureswithphen_fdr0.1_v1.tsv", col_names = c("CHR", "BP", "Phenotype"))
+signif15c<-read_tsv("Significant_GEMMA_15C_temperatureswithphen_fdr0.1_v1.tsv", col_names = c("CHR", "BP", "Phenotype"))
+signif18c<-read_tsv("Significant_GEMMA_18C_temperatureswithphen_fdr0.1_v1.tsv", col_names = c("CHR", "BP", "Phenotype"))
+signif22c<-read_tsv("Significant_GEMMA_22C_temperatureswithphen_fdr0.1_v1.tsv", col_names = c("CHR", "BP", "Phenotype"))
+signif25c<-read_tsv("Significant_GEMMA_25C_temperatureswithphen_fdr0.1_v1.tsv", col_names = c("CHR", "BP", "Phenotype"))
+
+significant<-full_join(signif12c, signif15c) %>% full_join(signif18c) %>% full_join(signif22c) %>% full_join(signif25c)
+
+
+
+snpeffresultsnew080424<-read_csv("highesteffectlittle.csv", col_names = FALSE)
+names(snpeffresultsnew080424) <- c("variant", "Variant_type", "Effect_strength", "Gene", "CHR", "BP")
+
+snpeffresultsnew080424_1<- snpeffresultsnew080424 %>% left_join(annotall) %>% left_join(significant) %>% left_join(pheno_table)
+write_csv(snpeffresultsnew080424_1, "forpubsnpeffresults.csv")
+
+#unique(snpeffresultsnew080424_1$Gene)
+
+snpeffresultsnew080424_16<-snpeffresultsnew080424_1 %>% dplyr::select( Gene, chromosome, start, end, Seq_Description) %>% drop_na(Seq_Description) %>% # remove NA values 
+  filter(!grepl('unnamed_protein_product', Seq_Description)) %>% # remove unnamed pred. genes
+  filter(!grepl('uncharacterized_protein', Seq_Description)) %>% # remove unnamed pred. genes
+  filter(!grepl('_predicted_protein', Seq_Description)) %>%
+  filter(!grepl('SPQ18253.1_2af7a199-4405-43fb-abde-30e69e36a884', Seq_Description)) %>%
+  filter(!grepl('hypothetical', Seq_Description))
+
+#unique(snpeffresultsnew080424_16$Gene)
+
+snpeffresultsnew080424_11<- snpeffresultsnew080424_1%>% ungroup() %>% dplyr::select(!(11:61)) %>% filter(Effect_strength =="MODERATE")
+snpeffresultsnew080424_12<- snpeffresultsnew080424_1%>% ungroup() %>% dplyr::select(!(11:61)) %>% filter(Effect_strength =="MODIFIER")
+snpeffresultsnew080424_13<- snpeffresultsnew080424_1%>% ungroup() %>% dplyr::select(!(11:61)) %>% filter(Effect_strength =="LOW")
+snpeffresultsnew080424_14<- snpeffresultsnew080424_1%>% ungroup() %>% dplyr::select(!(11:61)) %>% filter(Seq_Description =="uncharacterized_protein_MYCGRDRAFT_89611")  %>% filter(Effect_strength =="MODIFIER")
+snpeffresultsnew080424_15<- snpeffresultsnew080424_1%>% ungroup() %>% dplyr::select(!(11:61))
+#%>% filter(Variant_type %in% c("5_prime_UTR_premature_start_codon_gain_variant", "5_prime_UTR_variant"))
+write_csv(snpeffresultsnew080424_11, "forpubsnpeffresultsonlymoderate.csv")
+signifsubnumbgenes<-snpeffresultsnew080424_1 %>% group_by(Condition, CHR, Variant_type, Effect_strength, Gene, Phenotype) %>% count()
+
+
+
+signifsubnumbgenes_1<-snpeffresultsnew080424_1 %>% group_by(Condition, CHR, Variant_type, Effect_strength, Gene, Phenotype) %>% count() %>% dplyr::select(-n, -Variant_type, -Gene, -Phenotype) %>% ungroup() %>% group_by(Condition, Effect_strength, CHR) %>% count() %>% ungroup()
+
+signifsubnumbgenes_1$Effect_strength <- factor(signifsubnumbgenes_1$Effect_strength, levels=c('MODERATE', 'LOW', 'MODIFIER'))
+
+signifsubnumbgenes_1 %>% ggplot(aes(x=CHR , y=n, fill=Effect_strength))+geom_bar(position="stack", stat="identity") + facet_grid(rows=vars(Condition))+ coord_flip()+scale_x_continuous(breaks=seq(1,13, by=1) )+ labs(x="Chromosome", y="Number of genes with significant SNPs \n strongest functional effect prediction strength")+theme_bw() +
+  theme(panel.grid.major.y = element_blank())+scale_y_continuous(limits=c(0,18),expand=c(0,0),breaks=seq(0,18, by=1) )+ scale_fill_manual(values = c("#922b4a","#e05780" , "#ffc2d4"))
+
+
+
+signifsubnumbgenes_2<-snpeffresultsnew080424_1 %>% group_by(Condition, CHR, Variant_type, Effect_strength, Gene, Phenotype) %>% count() %>% ungroup()%>% dplyr::select(-n, -Gene, -Phenotype) %>% ungroup() %>% distinct()%>% group_by(Condition, Effect_strength, Variant_type, CHR) %>% count()
+
+signifsubnumbgenes_2$Effect_type<-paste(signifsubnumbgenes_2$Variant_type, "_", signifsubnumbgenes_2$Effect_strength)
+
+signifsubnumbgenes_2$Effect_type[signifsubnumbgenes_2$Effect_type == 'Orange St'] <- 'Portola Pkwy'
+
+signifsubnumbgenes_2 %>% ggplot(aes(x=CHR , y=n, fill=Variant_type))+geom_bar(position="stack", stat="identity") + facet_grid(rows=vars(Condition))+ coord_flip()+scale_x_continuous(breaks=seq(1,13, by=1) )+ labs(x="Chromosome", y="Number of genes with significant SNPs \n strongest functional effect prediction strength")+theme_bw() +
+  theme(panel.grid.major.y = element_blank())+scale_y_continuous(limits=c(0,18),expand=c(0,0),breaks=seq(0,18, by=1) )+ scale_fill_manual(values = c("#07cb91", "#059245", "#03592a", "#b8d507", "#01200F", "#89fbed", "#828904", "#06baa3", "#059482"), name="Variant type")
+
+
+suppltable3<-read_csv("Supplementary_Table_S3.csv")
+
+lali<-suppltable3 %>% dplyr::select(-Phenotype) %>% dplyr::select(Condition, CHROM, Highest_variant_type, Gene, Highest_effect) %>% distinct()
+
+lali2<-read_csv("lali2.csv")
+
+conditionspretty<-c("12ºC", "15ºC", "18ºC", "22ºC", "25ºC")
+names(conditionspretty) <- c("12C", "15C", "18C", "22C", "25C")
+variantypy<-c("upstream", "synonymous", "5' UTR", "missense", "3' UTR", "downstream", "splice region", "splice region & intron")
+names(variantypy) <- c(unique(lali2$Highest_variant_type))
+
+lali2%>% group_by(Condition, CHROM, Highest_variant_type)%>% count() %>% ungroup() %>% ggplot(aes(x=CHROM , y=n, fill=Highest_variant_type))+geom_bar(position="stack", stat="identity") + facet_grid(rows=vars(Condition), labeller=labeller(Condition=conditionspretty))+ coord_flip()+scale_x_continuous(breaks=seq(1,13, by=1) )+ labs(x="Chromosome", y="Number of genes with significant SNPs \n strongest functional effect prediction strength")+theme_bw() +
+  theme(panel.grid.major.y = element_blank())+scale_y_continuous(limits=c(0,12),expand=c(0,0),breaks=seq(0,12, by=1) )+ scale_fill_manual(values = c("#07cb91",  "#03592a", "#b8d507", "#01200F", "#89fbed", "#828904", "#06baa3", "#059482"), name="Variant type", labels=c(variantypy))
+
+
+
+  
+```
+
+
+
+# References

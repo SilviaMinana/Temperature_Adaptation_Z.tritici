@@ -1,0 +1,6 @@
+#!/bin/bash
+
+#Create Fst files comparison of Populations. 
+
+
+vcftools --gzvcf ./mafmiss.recode.vcf.gz --haploid --weir-fst-pop Annaba_pop_samples.txt --weir-fst-pop Argentina_pop_samples.txt --weir-fst-pop Australia_pop_samples.txt --weir-fst-pop Badgingarra_pop_samples.txt --weir-fst-pop Berg_am_Irchel_pop_samples.txt --weir-fst-pop California_pop_samples.txt --weir-fst-pop Canada_pop_samples.txt --weir-fst-pop Chapman_pop_samples.txt --weir-fst-pop Chile_pop_samples.txt --weir-fst-pop Czech_Republic_pop_samples.txt --weir-fst-pop Denmark_pop_samples.txt --weir-fst-pop Dezful_pop_samples.txt --weir-fst-pop Eschikon_pop_samples.txt --weir-fst-pop Ethiopia_pop_samples.txt --weir-fst-pop Germany_pop_samples.txt --weir-fst-pop Guelma_pop_samples.txt --weir-fst-pop Indiana_pop_samples.txt --weir-fst-pop Israel_pop_samples.txt --weir-fst-pop Mehran_pop_samples.txt --weir-fst-pop Missouri_pop_samples.txt --weir-fst-pop Narrogin_pop_samples.txt --weir-fst-pop Oregon_pop_samples.txt --weir-fst-pop Syria_pop_samples.txt --weir-fst-pop Texas_pop_samples.txt --weir-fst-pop Tunisia_pop_samples.txt --weir-fst-pop Turkey_pop_samples.txt --weir-fst-pop Ukraine_pop_samples.txt --weir-fst-pop United_Kingdom_pop_samples.txt --weir-fst-pop Uruguay_pop_samples.txt --weir-fst-pop Yemen_pop_samples.txt --out populationsfst

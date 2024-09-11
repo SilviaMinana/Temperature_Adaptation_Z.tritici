@@ -1,0 +1,347 @@
+---
+title: "Genetic diversity, Tajima's D and genetic differentiation of a worldwide collection of *Zymoseptoria tritici*"
+author: "Silvia Minana-Posada"
+date: "2024-02-24"
+output:  
+  rmdformats::robobook:
+    self_contained: true
+    number_sections: true
+    code_folding: hide
+    highlight: pygments
+    bibliography: references.bib
+bibliography: references.bib
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+```{r loadpackages, message=FALSE, warning=FALSE, error=FALSE}
+library(knitr)
+library(tidyverse)
+library(kableExtra)
+library(readr)
+library(RColorBrewer)
+library(rstatix)
+library(ggpubr)
+```
+
+# Introduction
+
+The source of the data displayed here was produced by calculating Fst, Tajima's D and genetic diversity by building from github vcftools but with the --haploid flag (developed by Julien Dutheil, <https://github.com/jydu/vcftools/tree/master>) [@danecek2011] . The per population and per genetic cluster whole-genome genetic diversity by 10 kb windows and Tajima's D were calculated by using variations of the code below:
+
+```{bash eval=FALSE, class.source = 'fold-show'}
+
+#Create nucleotide diversity files per each Population and each Genetic Cluster. 
+
+file="Adm_Clusterslist.txt"
+
+while IFS= read -r line; do
+  vcftools --gzvcf ./Adm_Cluster_analysis/${line}.new.vcf.gz --haploid --window-pi 10000 --out "${line}.nucleotidediversity"
+done < "$file"
+
+
+```
+
+```{bash eval=FALSE, class.source = 'fold-show'}
+
+#Create Tajima's D files per each Population and each Genetic Cluster. 
+
+
+file="Adm_Clusterslist.txt"
+
+while IFS= read -r line; do
+  vcftools --gzvcf ./Adm_Cluster_analysis/${line}.new.vcf.gz --haploid --TajimaD 10000 --out "${line}.tajimasd10kb"
+done < "$file"
+
+
+```
+
+
+For the genetic differentiation (Fst), the comparisons between populations and genetic clusters were done with a script that looked close to the script below:
+
+
+```{bash eval=FALSE, class.source = 'fold-show'}
+
+
+#Create Fst files comparison of Populations. 
+
+file="Populationslist.txt"
+
+while IFS= read -r line; do
+    vcftools --gzvcf ./mafmiss.recode.vcf.gz --haploid --weir-fst-pop Argentina_pop_samples.txt --weir-fst-pop ./Argentina/"${line}.txt" --out ./Argentina/"Argentina_vs_${line}_populationsfst"
+done < "$file"
+
+#The output files 
+
+
+```
+
+
+
+```{r loadfiles, message=FALSE, warning=FALSE, error=FALSE}
+
+#popfst<-read_table("populationsfst.weir.fst")
+#popfst <- popfst%>%
+#  mutate(WEIR_AND_COCKERHAM_FST = na_if(WEIR_AND_COCKERHAM_FST, "-nan")) 
+#popfst$WEIR_AND_COCKERHAM_FST<-as.numeric(popfst$WEIR_AND_COCKERHAM_FST)
+
+#hist(popfst$WEIR_AND_COCKERHAM_FST,br=20)
+
+#admclusfst<-read_table("admclustersfst.weir.fst")
+
+#hist(admclusfst$WEIR_AND_COCKERHAM_FST,br=20)
+
+a<-list.files(path = paste0("./"), pattern = "pop_samples.nucleotidediversity.windowed.pi")
+pathygem=paste0("./")
+pinucleotidediversitypop = data.frame()
+for (name in a) {
+  temp = read_table(file=paste0(pathygem, name), col_types=c("nnnnn")) %>% mutate(Location = sub("_pop_samples.nucleotidediversity.windowed.pi", "", name))
+  pinucleotidediversitypop = bind_rows(pinucleotidediversitypop, temp)
+}
+
+
+a<-list.files(path = paste0("./"), pattern = "_pop_samples.tajimasd10kb.Tajima.D")
+pathygem=paste0("./")
+tajimasdpop = data.frame()
+for (name in a) {
+  temp = read_table(file=paste0(pathygem, name), col_types=c("nnnn")) %>% mutate(Location = sub("_pop_samples.tajimasd10kb.Tajima.D", "", name))
+  tajimasdpop = bind_rows(tajimasdpop, temp)
+}
+
+
+
+a<-list.files(path = paste0("./Adm_cluster/"), pattern = "_samples.nucleotidediversity.windowed.pi")
+pathygem=paste0("./Adm_cluster/")
+pinucleotidediversityadmclus = data.frame()
+for (name in a) {
+  temp = read_table(file=paste0(pathygem, name), col_types=c("nnnnn")) %>% mutate(Adm_Cluster = sub("_samples.nucleotidediversity.windowed.pi", "", name))
+  pinucleotidediversityadmclus = bind_rows(pinucleotidediversityadmclus, temp)
+}
+
+
+a<-list.files(path = paste0("./Adm_cluster/"), pattern = "_samples.tajimasd10kb.Tajima.D")
+pathygem=paste0("./Adm_cluster/")
+tajimasdadmclus = data.frame()
+for (name in a) {
+  temp = read_table(file=paste0(pathygem, name), col_types=c("nnnn")) %>% mutate(Adm_Cluster = sub("_samples.tajimasd10kb.Tajima.D", "", name))
+  tajimasdadmclus = bind_rows(tajimasdadmclus, temp)
+}
+
+
+
+
+```
+
+# Tajima's D per genetic cluster and per population
+
+
+```{r tajimasd, message=FALSE, warning=FALSE, error=FALSE}
+
+
+d<-tajimasdadmclus
+wilcoxadmclustajimasd<-d %>% ungroup() %>% pairwise_wilcox_test(TajimaD ~ Adm_Cluster)%>% adjust_pvalue(method = "bonferroni") %>% add_significance("p.adj")%>% add_xy_position( scales="fixed") 
+
+
+padmclustajimasd<- d %>% ggplot(aes(x = Adm_Cluster, y = TajimaD)) + geom_jitter(alpha=0.3, color = "#A5333E" , show.legend = F, size=1.5) + 
+    geom_boxplot(fill="#A5333E", show.legend = F, outlier.shape = NA, alpha=0.5) +theme_minimal() +theme(axis.title.x = element_blank(), legend.position = "bottom") +labs(y = "Tajima's D", title="Tajima's D", subtitle= "for each genetic cluster") + theme(text = element_text(size=18)) + theme(axis.line = element_line(colour = "grey50"))+ scale_y_continuous( limits = c(-5, 18))+ stat_pvalue_manual(wilcoxadmclustajimasd, tip.length=0, hide.ns = TRUE,  y.position = 5, step.increase = 0.03)+
+  scale_x_discrete(guide = guide_axis(angle = 45))
+
+padmclustajimasd
+
+
+admclus<-unique(tajimasdadmclus$Adm_Cluster)
+
+tajimasdadmcluswithnumb = data.frame()
+for (lol in admclus){
+  temp= tajimasdadmclus %>% filter(Adm_Cluster == lol) %>% mutate(Numb=1:(length(Adm_Cluster)))
+  tajimasdadmcluswithnumb=bind_rows(tajimasdadmcluswithnumb, temp)
+  
+}
+
+
+ggplot(tajimasdadmcluswithnumb, aes(Numb, Adm_Cluster)) +
+  geom_tile(aes(fill = TajimaD)) +
+  geom_text(aes(label = round(TajimaD, 1))) +
+  scale_fill_gradient(low = "white", high = "red")
+
+
+tajimasdadmcluswithnumbavrg<-tajimasdadmcluswithnumb %>% ungroup() %>% group_by(Adm_Cluster) %>% summarize(Mean_tajimad=mean(TajimaD, na.rm=TRUE))%>% mutate(Columni=1)
+
+
+ggplot(tajimasdadmcluswithnumbavrg, aes( Columni,Adm_Cluster)) +
+  geom_tile(aes(fill = Mean_tajimad)) +
+  geom_text(aes(label = round(Mean_tajimad, 3))) +
+  scale_fill_gradient(low = "white", high = "red") +theme(axis.text.x=element_blank(),axis.ticks.x=element_blank(), axis.title.x=element_blank())
+
+
+
+locations<-unique(tajimasdpop$Location)
+
+tajimasdpopwithnumb = data.frame()
+for (lol in locations){
+  temp= tajimasdpop %>% filter(Location == lol) %>% mutate(Numb=1:(length(Location)))
+  tajimasdpopwithnumb=bind_rows(tajimasdpopwithnumb, temp)
+  
+}
+
+
+ggplot(tajimasdpopwithnumb, aes(Numb, Location)) +
+  geom_tile(aes(fill = TajimaD)) +
+  geom_text(aes(label = round(TajimaD, 1))) +
+  scale_fill_gradient(low = "white", high = "red")
+
+
+tajimasdpopwithnumbavrg<-tajimasdpopwithnumb %>% ungroup() %>% group_by(Location) %>% summarize(Mean_tajimad=mean(TajimaD, na.rm=TRUE))%>% mutate(Columni=1)
+
+
+ggplot(tajimasdpopwithnumbavrg, aes( Columni,Location)) +
+  geom_tile(aes(fill = Mean_tajimad)) +
+  geom_text(aes(label = round(Mean_tajimad, 7))) +
+  scale_fill_gradient(low = "white", high = "red") +theme(axis.text.x=element_blank(),axis.ticks.x=element_blank(), axis.title.x=element_blank())
+
+
+```
+
+
+# Nucleotide diversity $\pi$ per genetic cluster and per population
+
+
+
+```{r pinucleotidediversity, message=FALSE, warning=FALSE, error=FALSE}
+
+
+d<-pinucleotidediversityadmclus %>% filter(Adm_Cluster != "Other")
+wilcoxadmcluspi<-d %>% ungroup() %>% pairwise_t_test(PI ~ Adm_Cluster)%>% adjust_pvalue(method = "bonferroni") %>% add_significance("p.adj")%>% add_xy_position( scales="fixed") %>%
+  filter(p.signif == "ns")
+
+
+K_colors = c("#FF6319", #Argentina & Uruguay
+             "#FCCC0A", #Australia
+             "#8E258D", #Canada
+             "#C60C30", #Chile
+             "#012169", #Europe
+             "#1877F2", #Middle East
+             "#00A1DE", #Africa
+             "#6E3219" )#USA
+
+padmcluspi<- d %>% ggplot(aes(x = Adm_Cluster, y = PI))+
+    geom_violin(width=1.4, aes(fill= Adm_Cluster))+ 
+    geom_boxplot(color="grey40", outlier.shape = NA, alpha=0.3, width=0.3)  +theme_minimal() +theme(axis.title.x = element_blank(), legend.position = "none") +labs(y = "Nucleotide diversity") + theme(text = element_text(size=18)) + theme(axis.line = element_line(colour = "grey50"))+ scale_y_continuous(limits = c(-0.0, 0.05))+scale_x_discrete(guide = guide_axis(angle = 45))+ stat_pvalue_manual(wilcoxadmcluspi , tip.length=0, step.increase = 0.1, y.position = 0.043) + scale_fill_manual(values=K_colors)
+
+
+padmcluspi
+
+admclus<-unique(pinucleotidediversityadmclus$Adm_Cluster)
+
+pinucleotidediversityadmcluswithnumb = data.frame()
+for (lol in admclus){
+  temp= pinucleotidediversityadmclus %>% filter(Adm_Cluster == lol) %>% mutate(Numb=1:(length(Adm_Cluster)))
+  pinucleotidediversityadmcluswithnumb=bind_rows(pinucleotidediversityadmcluswithnumb, temp)
+  
+}
+
+
+ggplot(pinucleotidediversityadmcluswithnumb, aes(Numb, Adm_Cluster)) +
+  geom_tile(aes(fill = PI)) +
+  geom_text(aes(label = round(PI, 1))) +
+  scale_fill_gradient(low = "white", high = "red")
+
+
+
+
+
+pinucleotidediversityadmcluswithnumbavrg<-pinucleotidediversityadmcluswithnumb %>% ungroup() %>% group_by(Adm_Cluster) %>% summarize(Mean_pi=mean(PI))%>% mutate(Columni=1)
+
+
+ggplot(pinucleotidediversityadmcluswithnumbavrg, aes( Columni,Adm_Cluster)) +
+  geom_tile(aes(fill = Mean_pi)) +
+  geom_text(aes(label = round(Mean_pi, 4))) +
+  scale_fill_gradient(low = "white", high = "#7b7b7b", name = "Mean nucleotide diversity")+theme_minimal() +theme(axis.text.x=element_blank(),axis.ticks.x=element_blank(), axis.title.x=element_blank(), axis.title.y=element_blank()) +scale_y_discrete(position = "right")+ theme(text = element_text(size=18))+theme(legend.position = "left")
+
+
+
+
+
+locations<-unique(pinucleotidediversitypop$Location)
+
+pinucleotidediversitypopwithnumb = data.frame()
+for (lol in locations){
+  temp= pinucleotidediversitypop %>% filter(Location == lol) %>% mutate(Numb=1:(length(Location)))
+  pinucleotidediversitypopwithnumb=bind_rows(pinucleotidediversitypopwithnumb, temp)
+  
+}
+
+
+ggplot(pinucleotidediversitypopwithnumb, aes(Numb, Location)) +
+  geom_tile(aes(fill = PI)) +
+  geom_text(aes(label = round(PI, 1))) +
+  scale_fill_gradient(low = "white", high = "red")
+
+
+pinucleotidediversitypopwithnumbavrg<-pinucleotidediversitypopwithnumb %>% ungroup() %>% group_by(Location) %>% summarize(Mean_pi=mean(PI))%>% mutate(Columni=1)
+
+
+ggplot(pinucleotidediversitypopwithnumbavrg, aes( Columni,Location)) +
+  geom_tile(aes(fill = Mean_pi)) +
+  geom_text(aes(label = round(Mean_pi, 7))) +
+  scale_fill_gradient(low = "white", high = "red") +theme(axis.text.x=element_blank(),axis.ticks.x=element_blank(), axis.title.x=element_blank())
+
+
+```
+
+
+# Mean weighted and mean Fst per genetic cluster 
+
+
+```{r fst, message=FALSE, warning=FALSE, error=FALSE}
+
+
+weightedfst<-read_csv("fstvalues_weighted_admclus_260224.csv")%>%
+  pivot_longer(
+    cols = c(2:10),
+    names_to = "Coliname2",
+    values_to = "Fst_weighted_value"
+  )%>% na.omit()
+meanfst<-read_csv("fstvalues_mean_admclus_260224.csv")%>%
+  pivot_longer(
+    cols = c(2:10),
+    names_to = "Coliname2",
+    values_to = "Fst_mean_value"
+  )%>% na.omit() %>% filter(Coliname != "Other") %>% filter(Coliname2 != "Other")
+
+weightedfst$Coliname <- factor(weightedfst$Coliname, levels=c('Argentina_Uruguay', 'Australia', 'Canada', 'Chile', 'Europe', 'Middle_East', 'Tunisia', 'USA', 'Other'))
+weightedfst$Coliname2 <- factor(weightedfst$Coliname2, levels=c('Argentina_Uruguay', 'Australia', 'Canada', 'Chile', 'Europe', 'Middle_East', 'Tunisia', 'USA', 'Other'))
+
+
+ggpweight <- weightedfst  %>% ungroup()  %>%
+    ggplot(aes(x=Coliname, y=Coliname2, fill=Fst_weighted_value)) + 
+    geom_tile() +
+    theme(axis.text.x = element_text(angle=90, hjust=TRUE)) +
+    xlab("") + 
+    ylab("") +
+    geom_text(aes(label=round(Fst_weighted_value, 3)))+
+  scale_fill_gradient(low = "white", high = "red")+theme_minimal()+ coord_flip()
+
+ggpweight
+
+meanfst$Coliname <- factor(meanfst$Coliname, levels=c('Argentina_Uruguay', 'Australia', 'Canada', 'Chile', 'Europe', 'Middle_East', 'Tunisia', 'USA'))
+meanfst$Coliname2 <- factor(meanfst$Coliname2, levels=c('Argentina_Uruguay', 'Australia', 'Canada', 'Chile', 'Europe', 'Middle_East', 'Tunisia', 'USA'))
+
+
+ggpmean <- meanfst  %>% ungroup()  %>%
+    ggplot(aes(x=Coliname, y=Coliname2, fill=Fst_mean_value)) + 
+    geom_tile()  +
+    xlab("") + 
+    ylab("") +
+    geom_text(aes(label=round(Fst_mean_value, 3)))+
+  scale_fill_gradient(low = "white", high = "#7b7b7b", name=((expression('Mean F'[ST] ))))+theme_minimal()+
+    theme(axis.text.x = element_text(angle=90, hjust=TRUE, size=12), axis.text.y=element_text(size=12))+ coord_flip()
+
+ggpmean
+
+
+```
+
+
+
+# References

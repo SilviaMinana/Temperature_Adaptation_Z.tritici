@@ -1,0 +1,770 @@
+---
+title: "sNMF program with LEA package (admixture) for a worldwide collection of *Zymoseptoria tritici*"
+author: "Silvia Minana Posada"
+date: "2023-05-22"
+output: html_document
+---
+
+This script is to use the sNMF that is quite similar to ADMIXTURE software but faster through the LEA package in BioConductor. 
+
+
+```{r setup, include=FALSE}
+library(LEA)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(ggpubr)
+library(vcfR)
+library(RColorBrewer)
+library(viridis)
+library(tibble)
+library(tidyr)
+library(pophelper)
+library(gridExtra)
+library(grid)
+library(knitr)
+library(stringr)
+library(maps)
+library(scatterpie)
+library(raster); library(rasterVis); library(rworldxtra); data(countriesHigh)
+library(latticeExtra)
+#library(rgdal)
+library(broom)
+library(genio)
+
+```
+
+#### Population structure --> Admixture
+
+The clustering here is done by using the sNMF method from the LEA R package (http://membres-timc.imag.fr/Olivier.Francois/LEA/) on the same subset of SNPs as the PCA. It was done for 1 to 15 K with 10 repetitions, as it was done in Alice Feurtey GitHub. 
+
+```{r, fig.width=14, fig.height=10}
+
+#ped file created from vcf.gz using vcftools removing mitochondria
+file="newgenofile"
+
+
+indv_snmf = read_tsv("thinnedplusmaf.ind", col_names = F)
+names(indv_snmf) = "ID_genome_file"
+
+coorandcont<-read.csv("WP1_SMP_Coordandvariety_contlocextralat_20240826_v1.csv", sep=",", header=TRUE)
+
+anti_join(indv_snmf, coorandcont)
+anti_join(coorandcont, indv_snmf)
+
+allstraincoorandcont<-inner_join(indv_snmf, coorandcont)
+
+#geno<-read.geno("thinnedplusmaf.geno")
+#write.geno(geno, "newgenofile.geno")
+
+#Estimation of the ancestral individual coefficients and the frequences of the ancestral alleles
+
+#obj.snmf <- snmf(paste0(file, ".geno"), K=1:15, project="new", entropy=TRUE, rep=10, ploidy=1)
+
+#Load project
+project = load.snmfProject(paste(file,".snmfProject", sep=""))
+summary(project)
+
+
+
+K_list = c(1:15)
+
+#Extracting the clustering info for the best run per K
+datalist = list()
+for (i in K_list){
+  best = which.min(cross.entropy(project, K = i))
+  temp = as.data.frame(Q(project, i, best))
+  temp= cbind(indv_snmf, temp)
+
+  temp = temp %>%
+    gather("Cluster", "Admix_coef", -"ID_genome_file") %>%
+    mutate(K=i)
+   datalist[[i]] = as.tibble(temp)
+}
+
+snmf_results_per_K = bind_rows(datalist) %>%
+  inner_join(., allstraincoorandcont) %>%
+  unite(Geographic_region, Location_year, col = "for_display", remove = F)  
+
+
+afiles = character(length(K_list))
+for (i in K_list){
+  best = which.min(cross.entropy(project, K = i))
+  afiles[i] = Sys.glob(paste0(file, ".snmf/K",i, "/run", best, "/*Q"))
+}
+
+
+# create a qlist
+qlist <- readQBasic(afiles)
+al_qlist = alignK(qlist)
+
+lab_set = allstraincoorandcont %>%
+  dplyr::select(Geographic_region) %>%
+  mutate(Geographic_region = ifelse(is.na(Geographic_region), "Unknown", Geographic_region))
+
+K_colors = c("#f9c74f", "#f9844a", "#90be6d", "#f5cac3", 
+"#83c5be", "#f28482", "#577590", "#e5e5e5", "#a09abc",  "#52796f",
+"#219ebc", "#003049", "#82c0cc", "#283618", "white")
+
+#Low numbers
+from = 5
+up_to = 7
+p1 <-   plotQ(alignK(qlist[from:up_to], type = "across"),
+            imgoutput="join",
+            returnplot=T,exportplot=F,
+            basesize=11,
+            splab= paste0("K=", K_list[from:up_to]),
+            grplab=lab_set, ordergrp=T, grplabheight = 2, grplabsize = 5,
+            clustercol = K_colors)
+
+grid.arrange(p1$plot[[1]])
+
+#Medium numbers
+from = 7
+up_to = 8
+p2 <-   plotQ(alignK(qlist[from:up_to], type = "across"),
+            imgoutput="join",
+            returnplot=T,exportplot=F,
+            basesize=11,
+            splab= paste0("K=", K_list[from:up_to]),
+            grplab=lab_set, ordergrp=T,  grplabheight = 2, grplabsize = 2,
+            clustercol = K_colors)
+grid.arrange(p2$plot[[1]])
+
+#High numbers
+from = 12
+up_to = 15
+p3 <-   plotQ(alignK(qlist[from:up_to], type = "across"),
+            imgoutput="join",
+            returnplot=T,exportplot=F,
+            basesize=11,
+            splab= paste0("K=", K_list[from:up_to]),
+            grplab=lab_set, ordergrp=T, grplabangle = 90, grplabheight = 2, grplabsize = 2,
+            clustercol = K_colors)
+grid.arrange(p3$plot[[1]])
+
+
+
+from = 7
+up_to = 8
+p3 <-   plotQ(alignK(qlist[from:up_to], type = "across"),
+            imgoutput="join",
+            returnplot=T,exportplot=F,
+            basesize=14,
+            splab= paste0("K=", K_list[from:up_to]),
+            grplab=lab_set, ordergrp=T, grplabangle = 0, grplabheight = 2, grplabsize = 5,
+            clustercol = K_colors)
+
+grid.arrange(p3$plot[[1]])
+
+```
+
+From this analysis we can see that there are 3 samples that seem to be mistakes (probably labeling errors when they were sent for sequencing) and they are all part of the newly sequenced samples. These are : Ukraine_1995_ST95UR_E1a_1, Israel_1992_ISZD1d_1 and Texas_1994_ST94TXPB1a. These samples are kept here and will be removed from the phenotypic analyses.  
+
+I need to identify the isolates which belong to each of the clusters. For this, we need to set a threshold, since there are very few (or even no) isolates assigned fully to one only. I test two thresholds: isolates assigned to one cluster with a value higher than 0.75 and 0.9.
+```{r snmf threshold, fig.width=14, fig.height=7}
+
+isolateswrongstructure<-c("Ukraine_1995_ST95UR_F1c_1", "Israel_1992_ISZE2a_2", "Texas_1994_ST94TXPG7a_1", "Kenya_1994_STKE94ML1a", "Kenya_1994_STKE94MF1a")
+missing20rem<-c("Texas_1994_ST94TX_PF4a_1", "Tunisia_2008_ST08TN_33_1_2", "ST90ORE_a12_3B_13", "ST92YE_1") 
+snmf_results_per_K<-snmf_results_per_K %>% filter(!(ID_genome_file %in% isolateswrongstructure)) %>% filter(!(ID_genome_file %in% missing20rem))
+
+#Setting thresholds to compare
+chosen_threshold = 0.75
+chosen_threshold2 = 0.9
+
+pure_by_threshold = bind_rows(snmf_results_per_K %>%
+    filter(Admix_coef > chosen_threshold) %>% 
+    mutate(Threshold = paste0("> ", chosen_threshold)), 
+  snmf_results_per_K %>%
+    filter(Admix_coef > chosen_threshold2) %>%
+    mutate(Threshold = paste0("> ", chosen_threshold2)))
+
+
+# Number of pure isolates per K
+pure_by_threshold %>%
+    dplyr::group_by(K, Threshold) %>%
+    dplyr::count() %>%
+    ggplot(aes(x = as.factor(K), y = n, fill = Threshold)) +
+       geom_bar(stat = "identity", position = "dodge") +
+       theme_light() + scale_fill_manual(values = c("#2ec4b6", "#cbf3f0"))+ 
+    labs(x = "K", y = "Number of isolates", title = "Pure isolates per K") 
+
+
+# Number of pure isolates per K per country
+temp2 = pure_by_threshold %>%
+  dplyr::group_by(Geographic_region, for_display, Cluster, K, Threshold) %>%
+  dplyr::count() %>% ungroup() %>% group_by(Geographic_region, Cluster, K, Threshold) %>% 
+  mutate(freq = n / sum(n)) 
+
+myColors <- c("#DA4167", "grey", "#ffba0a", "#A20106", "#3F6E0C", "#129eba", "#8fa253" )
+names(myColors) = levels(factor(allstraincoorandcont$Geographic_region))
+Color_Geographic_region = ggplot2::scale_colour_manual(name = "Geographic_region", values = myColors)
+Fill_Geographic_region = ggplot2::scale_fill_manual(name = "Geographic_region", values = myColors)
+
+
+temp2 %>%
+  filter(K > 5 & K < 16) %>%
+  ggplot(aes(x = Cluster, y = for_display, size = n, color = Geographic_region)) +
+  geom_point(alpha = 0.3) + Color_Geographic_region+ theme_light() +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1)) +
+  facet_grid(rows = vars(Threshold), cols = vars(K), scales = "free_x") + 
+    labs(x = "", y = "", size = "Nb of isolates",
+         title = "Pure isolates per country and per K") 
+
+temp2 %>%
+  filter(K > 5 & K < 16) %>%
+  ggplot(aes(x = Cluster, y = for_display, size = freq, color = Geographic_region)) +
+  geom_point(alpha = 0.3) + Color_Geographic_region+ theme_light() +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1)) +
+  facet_grid(rows = vars(Threshold), cols = vars(K), scales = "free_x") + 
+    labs(x = "", y = "", size = "Proportion of isolates",
+         title = "Pure isolates per country and per K") 
+
+```
+
+### Choice of K
+
+"sNMF estimates an entropy criterion which evaluates the quality of fit of the model to the data, potentially helping to find the best number of ancestral populations" (Alice Feurtey's GitHub). Here we can see that from the cross-entropy, the curve does not reach easily a plateau, however, at K=8, the number of assigned samples it's the highest and the size of the smallest cluster drops after this K value. Therefore, this is the K value that was chosen according to these results.
+
+```{r choice K snmf}
+
+#Dot plot of the cross-entropy 
+#plot(project, col = "goldenrod", pch = 19, cex = 1.2) #native method
+cross_ent = list()
+for (i in K_list){
+  cross_ent[[i]] = as_tibble(cross.entropy(project, K = i), rownames = "NA") %>% 
+    mutate( K = i)
+  colnames(cross_ent[[i]] ) <- c("Run", "Crossentropy", "K")
+}
+cross_ent = bind_rows(cross_ent)
+temp = cross_ent %>% group_by(K) %>% dplyr::summarize(average = mean(Crossentropy), minimum = min(Crossentropy))
+
+p1 = ggplot() +
+  geom_point(data = cross_ent, aes(x = as.factor(K), y = Crossentropy), alpha = 0.4, size = 2, col = "#cbf3f0") +
+  geom_point(data = temp, aes(x = as.factor(K), y = minimum), alpha = 0.4, size = 2, col = "#2ec4b6") +
+  theme_light() +
+    labs(x = "K", y = "Cross-entropy")
+
+p2 = pure_by_threshold %>%
+  filter(Threshold == paste0("> ", chosen_threshold)) %>%
+  filter(K > 1) %>%
+  dplyr::group_by(Cluster, K) %>%
+  dplyr::count()%>%
+  group_by(K) %>%
+  dplyr::summarize(Size_smallest_cluster = min(n)) %>%
+  ggplot(aes(x = as.factor(K), label = Size_smallest_cluster)) +
+    geom_bar(aes(y = Size_smallest_cluster, fill = K), stat = "identity") + 
+    theme_light() +
+    geom_label(aes(y = Size_smallest_cluster + 7)) +
+    scale_fill_continuous(high = "#2ec4b6", low = "#cbf3f0") +
+    labs(x = "K", y = "Size of the smallest cluster")
+
+p3 = pure_by_threshold %>%
+  filter(Threshold == paste0("> ", chosen_threshold)) %>%
+    dplyr::group_by(K) %>%
+    dplyr::count() %>%
+    ggplot(aes(x = as.factor(K), y = n, fill = K)) +
+       geom_bar(stat = "identity", position = "dodge") +
+       theme_light() +
+       scale_fill_continuous(high = "#2ec4b6", low = "#cbf3f0") +
+    labs(x = "K", y = "Number of assigned samples")
+
+top_row = cowplot::plot_grid(p1, p3 + theme(legend.position = "none"), ncol = 2)
+cowplot::plot_grid(top_row, p2 + theme(legend.position = "none"), ncol = 1)
+```
+
+#### 
+
+```{r results chosen K}
+#These values are chosen based on the plot above
+chosen_K = 8
+
+write_tsv(snmf_results_per_K %>% filter(K == chosen_K), 
+          file = paste0(file, ".snmf_results_chosen_K.tab"))
+
+#Looking at individuals with admixture coef higher than the threshold defined above.
+high_anc_coef_snmf = snmf_results_per_K %>%
+  filter(K == chosen_K) %>%
+  filter(Admix_coef > chosen_threshold)
+
+anti_join(indv_snmf, high_anc_coef_snmf) #With this table we can see the samples that are not above the threshold, meaning that Ukraine, Turkey and a couple of other samples do not make the cut. 
+
+
+##Writing out tables for later
+high_anc_coef_snmf %>% dplyr::select(ID_genome_file) %>%
+  write_tsv(., file = paste0(file, ".high_anc_coef_snmf.ind"),
+            col_names = F)
+high_anc_coef_snmf %>%
+  write_tsv(., file = paste0(file, ".high_anc_coef_snmf.tsv"),
+            col_names = T) ### Use this file for clustering for phenotypic analyses. 
+
+
+
+# Making lists of samples per cluster for use later
+max_continent = dplyr::count(high_anc_coef_snmf, Cluster, Geographic_region) %>%
+  group_by(Cluster) %>%
+  mutate(somme = sum(n), prop = n/somme) %>%
+  filter(prop > 0.5) %>%
+  dplyr::select(Cluster, Geographic_region)
+
+clusters = dplyr::count(high_anc_coef_snmf, Cluster, Geographic_region) 
+
+
+## Files with all pure isolates per cluster
+for (cluster in max_continent %>% pull(Cluster)) {
+  file_name = paste0( "Sample_list_", cluster, ".args")
+  high_anc_coef_snmf %>% filter(Cluster == cluster) %>%
+    dplyr::select(ID_genome_file) %>%
+    write_tsv(file = file_name, col_names = F)
+}
+
+
+## Files with a similar number pure isolates between cluster
+
+minimum_cluster_size = min(dplyr::count(high_anc_coef_snmf, Cluster) %>% dplyr::select(n))
+
+for (cluster in max_continent %>% pull(Cluster)) {
+  for (i in 1:10 ){
+    file_name = paste0("Sample_list_", cluster, "_", i, ".args")
+    temp = high_anc_coef_snmf %>% 
+      filter(Cluster == cluster) %>%
+      sample_n(size = minimum_cluster_size) %>%
+      dplyr::select(ID_genome_file)
+    write_tsv(temp, file = file_name, col_names = F) 
+  }
+}
+
+```
+
+
+```{r}
+
+blabla<-anti_join(coorandcont, high_anc_coef_snmf) %>% mutate(Cluster="Other") %>% filter(!(ID_genome_file %in% isolateswrongstructure))%>% filter(!(ID_genome_file %in% missing20rem))
+
+K_colors = c("#FF6319", #Argentina & Uruguay
+             "#FCCC0A", #Australia
+             "#00A1DE", #Europe
+             "#4F359B", #Africa
+             "#6E3219",  #USA
+             "#0039A6", #Middle East
+             "#C60C30", #Chile
+             "#8E258D") #Canada
+
+full_join(high_anc_coef_snmf, blabla) %>% ungroup() %>% group_by(New_Location_year, Cluster) %>% count() %>%
+  ggplot(aes(x = New_Location_year, y = n, fill = Cluster))  + 
+    geom_bar(stat = "identity") +
+    scale_fill_manual(values = c("grey50", K_colors) ) + 
+    theme_light() +
+     labs(subtitle = "limited to countries with more than 5 isolates",
+         title = "Cluster climate KG-category",
+         y = "Number of isolates", fill = "Cluster")  +
+    theme(axis.title.x = element_blank(), 
+          axis.title.y = element_text(size = 12),
+          axis.text.x = element_text(angle = 50, hjust = 1, vjust = 1, size = 8),
+          axis.text.y = element_text(hjust = 1, vjust = 1, size = 10),
+          panel.spacing = unit(0, "lines"), 
+          strip.background = element_blank(),
+          strip.placement = "bottom",
+          strip.text = element_text(size = 5),
+          legend.position = "none")+ geom_text(aes(label=n), position=position_stack(vjust=0.5))
+
+
+```
+
+#### Geographic analysis of admixture results
+
+
+```{r}
+
+#Table of pure samples numbers per continent
+kable(snmf_results_per_K %>%
+  filter(K == chosen_K) %>%
+  filter(Admix_coef > chosen_threshold) %>%
+  dplyr::group_by(Geographic_region, Cluster) %>%
+  dplyr::count() %>%
+  pivot_wider(names_from = Geographic_region, values_from =n, values_fill = 0))
+
+
+##Bubble plot
+p_cluster = high_anc_coef_snmf %>%
+  dplyr::group_by(Geographic_region, for_display, Cluster) %>%
+  dplyr::count() %>%
+  ggplot(aes(x = for_display, y = Cluster,
+             size = n, color = Geographic_region)) +
+  geom_point(alpha = 0.5) + Color_Geographic_region+ theme_light() +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1)) +
+    labs(x = "", 
+         title = "Pure isolates per country for the chosen K value",
+         subtitle = str_wrap(paste0("Number of genotypes with admix coef > ", chosen_threshold, 
+                                    " assigned to ", chosen_K, " clusters."),
+                             width = 70),
+         size = "Nb of isolates") 
+p_cluster
+
+```
+
+The clustering data can also be represented as an average of ancestry coefficient per population. This is done here first with barplots. 
+```{r per country ancestry coef}
+#Setting data with the chosen number of K as well as the chosen coefficient threshold
+chosen_coef = snmf_results_per_K %>% 
+  filter(K == chosen_K) %>%
+  #filter(Country != "NA") %>%
+  #filter(Country != "USA_NA") %>%
+  dplyr::select(ID_genome_file, Geographic_region, Location_year, Location,Admix_coef, Cluster, Latitude, Longitude, Country, New_Location_year) 
+
+
+#K_colors = c("#8ECAE6", #Argentina & Uruguay
+#             "#49810E", #Australia
+#             "#E16684", #Europe
+#             "#FFBA0A", #Africa
+#             "#126782", #USA
+#             "#219EBC", #Middle East
+#             "#8FA253", #Chile
+#             "#650104") #Canada
+
+
+
+K_colors = c("#FF6319", #Argentina & Uruguay
+             "#FCCC0A", #Australia
+             "#00A1DE", #Europe
+             "#4F359B", #Africa
+             "#6E3219",  #USA
+             "#0039A6", #Middle East
+             "#C60C30", #Chile
+             "#8E258D") #Canada
+
+             
+             
+             
+            
+
+
+#Identifying the main cluster per country
+cluster_per_country = high_anc_coef_snmf %>%
+  group_by(Cluster, New_Location_year) %>%
+  dplyr::summarise(n = n()) %>%
+  dplyr::mutate(freq = n / sum(n)) %>%
+  filter(freq > 0.5) %>%
+  dplyr::select(New_Location_year, Main_country_cluster = Cluster)
+
+# Cluster composition per country for all continents
+temp = chosen_coef %>%
+  group_by(Geographic_region, Location_year, Location, Country, Cluster, New_Location_year) %>%
+  dplyr::summarize(average_coef = mean(Admix_coef),
+                   Nb_per_country = n()) %>%
+  dplyr::mutate(Cluster2 = ifelse(average_coef < 0.1, "Other", Cluster))%>% filter(Nb_per_country > 4) 
+  
+
+#Bar plot per country
+temp %>%
+  ggplot(aes(x = , New_Location_year, y = average_coef, fill = Cluster2))  + 
+    geom_bar(stat = "identity") +
+    scale_fill_manual(values = c("grey", K_colors) ) + 
+    theme_light() +
+     labs(
+         y = "Average of the ancestry coefficient", fill = "Cluster") +
+    facet_grid(cols = vars(Geographic_region), switch = "x", scales = "free_x", space = "free_x") +
+    theme(axis.title.x = element_blank(), 
+          axis.title.y = element_text(size = 12),
+          axis.text.x = element_text(angle = 50, hjust = 1, vjust = 1, size = 8),
+          axis.text.y = element_text(hjust = 1, vjust = 1, size = 10),
+          panel.spacing = unit(0, "lines"), 
+          strip.background = element_blank(),
+          strip.placement = "bottom",
+          strip.text = element_text(size = 10),
+          legend.position = "none")
+
+```
+
+Map of the results showed above to visualize geographically the different results per geographic region. 
+
+
+```{r}
+
+colors.gengroups<-c("grey30", "#FF6319", #Argentina & Uruguay
+             "#FCCC0A", #Australia
+             "#020057", #Europe
+             "#7cdbff", #Africa
+             "#6E3219",  #USA
+             "#1a5fff", #Middle East
+             "#C60C30", #Chile
+             "#8E258D") #Canada
+
+
+
+
+temp = chosen_coef %>% ungroup() %>%
+  group_by( New_Location_year, Geographic_region, Cluster, Longitude, Latitude) %>%
+  dplyr::summarize(average_coef = mean(Admix_coef), number_of_isolates = n()) %>%
+  filter(!is.na(Latitude))
+
+write_tsv(temp, file = paste0(file, ".chosen_coef_pies.tab"))
+
+#Transforming to fit the scatter pie requirements
+pies  = temp %>% ungroup()%>% filter(number_of_isolates > 5) %>%
+  dplyr::mutate(Cluster2 = ifelse(average_coef < 0.2, "Other", Cluster)) %>% 
+  group_by(Geographic_region, New_Location_year, Longitude, Latitude,  Cluster2, number_of_isolates) %>%
+  dplyr::summarize(to_plot = sum(average_coef)) %>%
+  arrange(Cluster2) %>%
+  pivot_wider(names_from = Cluster2, values_from = to_plot, values_fill = 0) %>%
+  dplyr::mutate(radius = log10(number_of_isolates)) %>%
+  dplyr::select(-number_of_isolates) ## Less than 20% of the average_coef it's called Other 
+#%>%
+ # dplyr::mutate(radius = ifelse(number_of_isolates > 5, 1, log(number_of_isolates)))
+
+
+
+names(colors.gengroups) = c("Other", "Argentina_Uruguay", "Australia", "Europe", "Tunisia", "USA", "Middle_East", "Chile", "Canada")
+
+pies<- pies %>% rename(Argentina_Uruguay=V1, Australia=V2, Europe=V3, Tunisia=V4, USA=V5, Middle_East=V6, Chile=V7, Canada=V8)
+# Simple map of the world
+
+max_circle = max(allstraincoorandcont %>%
+  dplyr::count(Latitude, Longitude, New_Location_year, name = "Number_genomes") %>%
+  dplyr::select(Number_genomes))
+
+map1 = ggplot() + 
+  theme_void() +
+  geom_polygon(data = map_data("world"), aes(x=long, y = lat, group = group), fill="#c9ab80")  +
+  scale_size("Number of genomes", limits = c(1, max_circle))  +
+  theme( panel.border  = element_rect(fill=NA, colour = "grey",size = 0.5, linetype = 1)) +
+    scale_fill_manual(values = c(colors.gengroups))
+
+#Splitting the map into our 3 main focus areas
+p1 = map1 + coord_cartesian(xlim=c(-20, 60), ylim=c(20, 70)) + 
+  geom_scatterpie(data = pies, mapping = aes(x=Longitude, y=Latitude, group=New_Location_year, r = radius*1.8), 
+                  cols = c("Other", "Argentina_Uruguay", "Australia", "Europe", "Tunisia", "USA", "Middle_East", "Chile", "Canada"),  alpha=.8)+theme(panel.border = element_rect(color = "#484848", fill = NA, size = 0.5))+theme(legend.position = "None")
+p2 = map1 + coord_cartesian(xlim=c(-160, -40), ylim=c(-80, 80)) + 
+  geom_scatterpie(data = pies, mapping = aes(x=Longitude, y=Latitude, group=New_Location_year, r = radius*3.6), 
+                   cols = c("Other", "Argentina_Uruguay", "Australia", "Europe", "Tunisia", "USA", "Middle_East", "Chile", "Canada"),  alpha=.8)+theme(panel.border = element_rect(color = "#484848", fill = NA, size = 0.5))+theme(legend.position = "None")
+p3 = map1 + coord_cartesian(xlim=c(105, 185), ylim=c(-65, 10)) + 
+  geom_scatterpie(data = pies, mapping = aes(x=Longitude, y=Latitude, group=New_Location_year, r = radius*2.5), 
+                   cols = c("Other", "Argentina_Uruguay", "Australia", "Europe", "Tunisia", "USA", "Middle_East", "Chile", "Canada"),  alpha=.8)+theme(panel.border = element_rect(color = "#484848", fill = NA, size = 0.5))+theme(legend.position = "None")
+
+#Plotting all the maps together! 
+aus_map = cowplot::plot_grid(p3,  ncol = 2, rel_widths = c(1, 0.9))
+ligne = cowplot::plot_grid(p1, aus_map, ncol = 1,  rel_heights = c(1, 0.7))
+cowplot::plot_grid(p2, ligne, ncol = 2, rel_widths = c(0.8, 1)) 
+
+ggsave(paste0("Str_scatter_pie_v7.pdf"), width = 18, height = 10, units = "cm")
+
+
+
+
+```
+
+
+
+
+```{r}
+
+# Read raster files
+period='1986-2010'
+r <- raster(paste('KG_', period, '.grd', sep=''))
+
+# Color palette for climate classification
+climate.colors=c("#C8C8C8", "#C8C8C8", "#C8C8C8", "#C8C8C8", "#eeb94f", "#C8C8C8", "#C8C8C8", "#b15e12", "#8fb314", "#586e0c", "#C8C8C8", "#00cba6", "#00513b", "#C8C8C8", "#C8C8C8", "#04b256", "#C8C8C8", "#C8C8C8", "#e7ade7", "#C8C8C8", "#C8C8C8", "#C8C8C8", "#C8C8C8", "#C8C8C8", "#C8C8C8", "#C8C8C8", "#C8C8C8", "#C8C8C8", "#C8C8C8", "#C8C8C8", "#C8C8C8", "#FFFFFF")
+
+
+#climate.colors=c("#960000", "#FF0000", "#FF6E6E", "#FFCCCC", "#CC8D14", "#CCAA54", "#FFCC00", "#FFFF64", "#007800", "#005000", "#003200", "#96FF00", "#00D700", "#00AA00", "#BEBE00", "#8C8C00", "#5A5A00", "#550055", "#820082", "#C800C8", "#FF6EFF", "#646464", "#8C8C8C", "#BEBEBE", "#E6E6E6", "#6E28B4", "#B464FA", "#C89BFA", "#C8C8FF", "#6496FF", "#64FFFF", "#F5FFFF")
+
+
+# Legend must correspond to all climate classes, insert placeholders
+r0 <- r[1:32]; r[1:32] <- seq(1,32,1)
+
+# Converts raster field to categorical data
+r <- ratify(r); rat <- levels(r)[[1]]
+
+# Legend is always drawn in alphabetic order
+rat$climate <- c('Af', 'Am', 'As', 'Aw', 'BSh', 'BSk', 'BWh', 'BWk', 'Cfa', 'Cfb','Cfc', 'Csa', 'Csb', 'Csc', 'Cwa','Cwb', 'Cwc', 'Dfa', 'Dfb', 'Dfc','Dfd', 'Dsa', 'Dsb', 'Dsc', 'Dsd','Dwa', 'Dwb', 'Dwc', 'Dwd', 'EF','ET', 'Ocean')
+
+# Remove the placeholders
+r[1:32] <- r0; levels(r) <- rat
+
+# Select region (Australia)
+# x1=80; x2=180; y1=-50; y2=20; xat=5; yat=5	
+# Select region (Europe)
+# x1=-20; x2=80; y1=30; y2=75; xat=5; yat=5		
+# Select region (US)
+# x1=-130; x2=-60; y1=20; y2=60; xat=5; yat=5
+# Select region (Global)
+ x1=-180; x2=180; y1=-90; y2=90; xat=20; yat=10
+
+r <- crop(r, extent(x1, x2, y1, y2))
+
+# Visualization		
+
+for (loca in unique(allstraincoorandcont$New_Location_year)) {
+    temp=allstraincoorandcont %>% filter(New_Location_year == loca) %>% group_by( New_Location_year, Geographic_region, Country) %>% dplyr::summarize(Longitude = mean(Longitude), Latitude=mean(Latitude)) 
+    lon=temp$Longitude ; lat=temp$Latitude
+    KG=r[cellFromXY(r, c(lon, lat))]
+    addedKGregion<- temp %>% mutate(KGnum=KG)
+      #Concatenate the tables
+    if (loca == unique(allstraincoorandcont$New_Location_year)[[1]]) { 
+      allstraincoorandcontKGnum = addedKGregion 
+    }
+    else { 
+      allstraincoorandcontKGnum = bind_rows(allstraincoorandcontKGnum, addedKGregion)
+    }
+}
+
+
+getmode <- function(v) {
+   uniqv <- unique(v)
+   uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+getmode(allstraincoorandcontKGnum$KGnum) #Therefore, the mode is 10. 
+
+nameandnumclimate<-as.data.frame(r@data@attributes) %>% rename(KGnum=ID)
+
+climatelocations<-left_join(allstraincoorandcontKGnum, nameandnumclimate)
+
+climatelocations #10 is Cfb
+
+write.csv((climatelocations %>% ungroup() %>% dplyr::select(-Geographic_region)), "climateclass.csv", row.names=F)
+
+unique(climatelocations$climate)
+
+
+pies<-pies %>% rename(x=Longitude, y=Latitude)
+
+rdf<-as.data.frame(r, xy = TRUE)
+
+
+
+
+names(climate.colors)<-c('Af', 'Am', 'As', 'Aw', 'BSh', 'BSk', 'BWh', 'BWk', 'Cfa', 'Cfb','Cfc', 'Csa', 'Csb', 'Csc', 'Cwa','Cwb', 'Cwc', 'Dfa', 'Dfb', 'Dfc','Dfd', 'Dsa', 'Dsb', 'Dsc', 'Dsd','Dwa', 'Dwb', 'Dwc', 'Dwd', 'EF','ET', 'Ocean')
+colors.gengroups<-c("grey30", "#FF6319", #Argentina & Uruguay
+             "#FCCC0A", #Australia
+             "#020057", #Europe
+             "#7cdbff", #Africa
+             "#6E3219",  #USA
+             "#1a5fff", #Middle East
+             "#C60C30", #Chile
+             "#8E258D") #Canada
+
+names(colors.gengroups) = c("Other", "Argentina_Uruguay", "Australia", "Europe", "Tunisia", "USA", "Middle_East", "Chile", "Canada")
+
+#pies<- pies %>% rename(Argentina_Uruguay=V1, Australia=V2, Europe=V3, Tunisia=V4, USA=V5, Middle_East=V6, Chile=V7, Canada=V8)
+
+map2<-ggplot(na.omit(rdf), aes(x=x, y=y, fill=factor(layer_climate), group = 1)) +geom_raster(alpha=0.5) + coord_equal() +scale_fill_manual(values=c(climate.colors, colors.gengroups), breaks= c("BSh", "BWk", "Cfa", "Cfb", "Csa",  "Csb", "Cwb", "Dfb", "Other", "Argentina_Uruguay", "Australia", "Europe", "Tunisia", "USA", "Middle_East", "Chile", "Canada")) +theme_void() +theme(legend.position = "None") + labs(legend="KG_Climate") 
+#Splitting the map into our 3 main focus areas
+p1 = map2 + coord_cartesian(xlim=c(-20, 60), ylim=c(20, 70)) + 
+  geom_scatterpie(data = pies, mapping = aes(x=x, y=y, group=New_Location_year, r = radius*1.9), 
+                  cols = c("Other", "Argentina_Uruguay", "Australia", "Europe", "Tunisia", "USA", "Middle_East", "Chile", "Canada"), alpha=.8)+theme(legend.position = "None") + 
+  theme(panel.border = element_rect(color = "#484848", 
+                                    fill = NA, 
+                                    size = 0.5))
+p2 = map2 + coord_cartesian(xlim=c(-160, -40), ylim=c(-80, 80)) + 
+  geom_scatterpie(data = pies, mapping = aes(x=x, y=y, group=New_Location_year, r = radius*3.5), 
+                   cols = c("Other", "Argentina_Uruguay", "Australia", "Europe", "Tunisia", "USA", "Middle_East", "Chile", "Canada"), alpha=.8)+theme(legend.position = "None")+ 
+  theme(panel.border = element_rect(color = "#484848", 
+                                    fill = NA, 
+                                    size = 0.5))
+p3 = map2 + coord_cartesian(xlim=c(95, 185), ylim=c(-65, 10)) + 
+  geom_scatterpie(data = pies, mapping = aes(x=x, y=y, group=New_Location_year, r = radius*3), 
+                   cols = c("Other", "Argentina_Uruguay", "Australia", "Europe", "Tunisia", "USA", "Middle_East", "Chile", "Canada"), alpha=.8)+theme(legend.position = "None")+ 
+  theme(panel.border = element_rect(color = "#484848", 
+                                    fill = NA, 
+                                    size = 0.5))
+
+
+
+#Plotting all the maps together 
+aus_map = cowplot::plot_grid(p3, get_legend(p1), ncol = 2, rel_widths = c(1, 0.75))
+ligne = cowplot::plot_grid(p1, aus_map, ncol = 1,  rel_heights = c(1, 0.7))
+cowplot::plot_grid(p2, ligne, ncol = 2, rel_widths = c(0.8, 1)) 
+
+ggsave(paste0("Str_scatter_pie_withgeoregionsbiomes.pdf"), width = 18, height = 10, units = "cm")
+
+knitr::include_graphics("explainedkoppenclimate.jpg") # Table from Wikipedia https://en.wikipedia.org/wiki/K%C3%B6ppen_climate_classification 
+
+
+
+
+
+```
+
+
+
+```{r}
+
+
+
+
+temp = chosen_coef  %>%
+  group_by(Geographic_region, Location, Location_year, Cluster, Longitude, Latitude, New_Location_year) %>%
+  dplyr::summarize(average_coef = mean(Admix_coef), number_of_isolates = n()) %>% filter(number_of_isolates >= 5) %>% filter(!is.na(Latitude)) %>% full_join((climatelocations%>% dplyr::select(New_Location_year, climate)))  %>% ungroup() %>% filter(average_coef >0.8) %>% group_by(Cluster, climate) %>% summarize (avrnumiso= sum(number_of_isolates))
+
+temp %>%
+  ggplot(aes(x = climate, y = avrnumiso, fill = Cluster))  + 
+    geom_bar(stat = "identity") +
+    scale_fill_manual(values = c(K_colors) ) + 
+    theme_light() +
+     labs(subtitle = "limited to countries with more than 5 isolates",
+         title = "Cluster climate KG-category",
+         y = "Number of isolates", fill = "Cluster")  +
+    theme(axis.title.x = element_blank(), 
+          axis.title.y = element_text(size = 12),
+          axis.text.x = element_text(angle = 50, hjust = 1, vjust = 1, size = 8),
+          axis.text.y = element_text(hjust = 1, vjust = 1, size = 10),
+          panel.spacing = unit(0, "lines"), 
+          strip.background = element_blank(),
+          strip.placement = "bottom",
+          strip.text = element_text(size = 10),
+          legend.position = "bottom")
+
+
+```
+
+
+# Principal Components Analysis (PCA) of thinned biallelic SNPs 
+
+```{r}
+
+A<-read_eigenvec(
+  "./plink2.eigenvec",
+  ext = "eigenvec",
+  plink2 = TRUE,
+  verbose = TRUE)
+summary(A)
+
+fileforpca<-read.csv("fileforpca.csv")
+B<-read.table("./plink2.eigenvec")
+
+
+K_colors = c("#FF6319", #Argentina & Uruguay
+             "#FCCC0A", #Australia
+             "#020057", #Europe
+             "#7cdbff", #Africa
+             "#6E3219",  #USA
+             "#1a5fff", #Middle East
+             "#C60C30", #Chile
+             "#8E258D") #Canada
+
+ggplot(B, aes(x=V3, y=V4))+geom_point()
+
+C<-B %>% rename(ID_genome_file=V2, PC1=V3, PC2=V4, PC3=V5, PC4=V6, PC5=V7, PC6=V8, PC7=V9, PC8=V10, PC9=V11, PC10=V12) %>% dplyr::select(-V1) %>% full_join(fileforpca)
+
+names(K_colors) = c("Argentina_Uruguay", "Australia", "Europe", "Tunisia", "USA", "Middle_East", "Chile", "Canada")
+
+
+
+eigenval <- scan("./plink2.eigenval")
+
+pve <- data.frame(PC = 1:10, pve = eigenval/sum(eigenval)*100)
+
+a <- ggplot(pve, aes(PC, pve)) + geom_bar(stat = "identity")
+a + ylab("Percentage variance explained") + theme_light()
+
+cumsum(pve$pve)
+
+ggplot(C, aes(x=PC1, y=PC2, col=Cluster))+geom_point(alpha=0.5, size=4)+
+  scale_color_manual(values= K_colors)+ theme_minimal()+ theme(axis.line = element_line(colour = "grey50"))+ theme(text = element_text(size=16))+labs(x=paste0("Principal Component 1 (", round((pve$pve)[1], 3), "%)"), y=paste0("Principal Component 2 (", round((pve$pve)[2], 3), "%)"))+theme(legend.position="none")
+
+```
+
+
+

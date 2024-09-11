@@ -1,0 +1,158 @@
+---
+title: "Analysis of molecular variance of a worldwide collection of *Zymoseptoria tritici*"
+author: "Silvia Minana-Posada"
+date: "2024-02-15"
+output: 
+  rmdformats::robobook:
+    self_contained: true
+    number_sections: true
+    code_folding: hide
+    highlight: haddock
+    bibliography: references.bib
+    use_bookdown : true
+bibliography: references.bib
+link-citations: true
+---
+
+Based on Alice Feurtey's code developed the 24.04.2023.
+
+
+SNPs were sampled over the whole genome, while removing variants with more than 0.8 missing data, with more/less than 2 alleles, and with a minor allele count lower than 0.05. To further reduce the amount of redundant data, only SNPs further than 1kb apart were kept.
+
+I show two plots that represent the number of samples I have used for the analysis.
+
+```{r message=FALSE, error=FALSE, warning=FALSE}
+library(tidyverse)
+library(pegas)
+library(adegenet)
+library(poppr)
+library(knitr)
+library(RColorBrewer)
+library(hierfstat)
+library(knitr)
+
+```
+
+```{r message=FALSE, error=FALSE, warning=FALSE}
+
+k8admixture<-read_csv("infotable.csv")
+
+
+missing20rem<-c("Texas_1994_ST94TX_PF4a_1", "Tunisia_2008_ST08TN_33_1_2", "ST90ORE_a12_3B_13", "ST92YE_1")  
+
+isolateswrongstructure<-c("Ukraine_1995_ST95UR_F1c_1", "Israel_1992_ISZE2a_2", "Texas_1994_ST94TXPG7a_1", "Kenya_1994_STKE94ML1a", "Kenya_1994_STKE94MF1a")
+
+
+metadata<-k8admixture  %>% filter(!(ID_genome_file %in% missing20rem)) %>% filter(!(ID_genome_file %in% isolateswrongstructure)) 
+
+
+```
+
+```{r message=FALSE, error=FALSE, warning=FALSE}
+
+project_dir="./"
+vcf_file="thinnedplusindvrem.recode.vcf"
+info <- VCFloci(paste0(project_dir, vcf_file))
+
+info$ID <- c(1:nrow(info))
+
+x <- read.vcf(paste0(project_dir, vcf_file), from = 1, to = nrow(info)) 
+
+```
+
+```{r message=FALSE, error=FALSE, warning=FALSE}
+colnames(x) <- c(1:nrow(info))
+g<-loci2genind(x, ploidy = 1)
+
+print(paste0("I have worked on ", nrow(info), " SNPs."))
+
+```
+
+```{r message=FALSE, error=FALSE, warning=FALSE}
+for_strata = tibble(samples = rownames(x)) %>% 
+  left_join(metadata, by = c("samples" = "ID_genome_file")) %>%
+  select(samples, Location, Adm_Cluster) %>% drop_na()
+
+strata(g) <- for_strata
+
+
+kable(t(table(strata(g, ~Adm_Cluster/Location, combine = FALSE))))
+```
+
+```{r message=FALSE, error=FALSE, warning=FALSE}
+count(strata(g, ~Adm_Cluster/Location, combine = FALSE), Adm_Cluster, Location) %>%
+  ggplot(aes(x = Location, y = n, label = n)) +
+  geom_bar(stat = "identity") +
+  geom_label() +
+  theme_classic() +
+  facet_wrap(vars(Adm_Cluster), scales = "free") +
+  theme(axis.title.x = element_blank())
+```
+
+# AMOVA
+
+AMOVA stands for Analysis of MOlecular VAriance and is a method to detect population differentiation utilizing molecular markers [@excoffier1992]. From the paper, "This analysis of molecular variance (AMOVA) produces estimates of variance components and F-statistic analogs, designated here as phi-statistics, reflecting the correlation of haplotypic diversity at different levels of hierarchical subdivision."
+
+To create the AMOVA, we need to create a hierarchical structure (strata) that indicate the different level of structure in the sampling. Here I have chosen "Locations" which are fields/countries and "Adm_Cluster" which are genetic clusters. Code inspired by <https://grunwaldlab.github.io/Population_Genetics_in_R/AMOVA.html>
+
+```{r}
+
+amova_test <- poppr.amova(g, ~Adm_Cluster/Location)
+
+
+
+```
+
+```{r}
+amova_test
+
+```
+
+```{r}
+
+# Create test data.
+data <- as_tibble(amova_test$componentsofcovariance, rownames = "Comparison") %>%
+  select(Comparison, Percent = `%`) %>%
+  filter(Comparison != "Total variations")
+ 
+# Compute percentages
+data$fraction <- data$Percent / sum(data$Percent)
+
+# Compute the cumulative percentages (top of each rectangle)
+data$ymax <- cumsum(data$fraction)
+
+# Compute the bottom of each rectangle
+data$ymin <- c(0, head(data$ymax, n=-1))
+
+# Compute label position
+data$labelPosition <- (data$ymax + data$ymin) / 2
+
+# Compute a good label
+data$label  <- paste0(round(data$Percent, 2), "%")
+#<- paste0(data$category, "\n value: ", data$count)
+
+legend_title<-"Components of variance"
+
+# Make the plot
+ggplot(data, aes(ymax=ymax, ymin=ymin, xmax=4, xmin=3, fill=Comparison)) +
+  geom_rect() +
+  geom_label( x=3.5, aes(y=labelPosition, label=label), size=5, show.legend = FALSE) +
+  scale_fill_manual(legend_title,values=c("#dddddd", "#acacac", "#858585"),labels=c('Between strains of different Genetic Clusters', 'Between strains of same Genetic Cluster', 'Within Populations')) +
+  coord_polar(theta="y") +
+  xlim(c(2, 4)) +
+  theme_void() +
+  labs(title = "") + theme(legend.text=element_text(size=14), legend.title=element_text(size=16))
+
+
+```
+
+
+
+```{r eval=FALSE}
+Aeutsignif   <- randtest(amova_test, nrepet = 999)
+Aeutsignif #all significant, first less then greater and greater.
+
+
+```
+
+# References

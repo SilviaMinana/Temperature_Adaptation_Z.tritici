@@ -1,0 +1,4178 @@
+---
+title: "Genome Wide Association Studies results visualization for temperature adaptation of a worldwide collection of *Zymoseptoria tritici*"
+author: "Silvia Minana Posada"
+date: "2023-04-28"
+output: 
+  rmdformats::robobook:
+    self_contained: true
+    number_sections: true
+    code_folding: show
+    highlight: haddock
+    bibliography: references.bib
+    use_bookdown : true
+bibliography: references.bib
+link-citations: true
+---
+
+# Introduction
+
+The GEMMA .assoc files were created through the following code using the pipeline vcf2gwas [@vogt2022] (<https://github.com/frankvogt/vcf2gwas>):
+
+```{bash eval=FALSE, class.source = 'fold-show'}
+
+conda activate GWASenv
+
+vcf2gwas -v Common_vcf.ALLv2.filtered.clean.vcf.gz -pf Phenotypegrowthratelogisticsens_outrem_v2.csv -ap -lmm -cf PCA -c 2
+
+conda deactivate
+
+
+```
+
+# Read GEMMA GWAS files and Phenotypes files
+
+Through out this document things will be divided by phenotypes related to the growth variables at 5 temperature conditions. Most of the code is modified from Alice Feurtey's GitHub code. The script working directory is always an R project folder. Many parts of the code say `eval=FALSE` due to the long running time. Files were created with the results only with the 13 core chromosomes and -logP above 2. The resulting pdf files with the graphs are included in the Supplementary figures.
+
+```{r message=FALSE, error=FALSE, warning=FALSE}
+
+library(cowplot)
+library(tidyverse)
+library(GWASTools)
+library(readr)
+library(RColorBrewer)
+library(qvalue)
+library(knitr)
+library(rmarkdown)
+
+
+```
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+all_varfin1<-read.csv("all_varfin_temp.csv", header=TRUE, sep=",") %>% rename(Phenotype=coliname) %>% filter(Type=="Temperature")
+
+condition<-unique(all_varfin1$cond)
+
+
+```
+
+## 12ºC
+
+### Load 12ºC Condition GWAS results
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+a<-list.files(path = paste0("./WWC/Phenotyping/", condition[1], "/" ), pattern = ".assoc")
+pathygem=paste0("./WWC/Phenotyping/", condition[1], "/" )
+resultsgem = data.frame()
+for (name in a) {
+  temp = read_tsv(file=paste0(pathygem, name), col_types=c("dcddccdddddd")) %>%   dplyr::select(CHR=chr, BP=ps, P=p_wald) %>% mutate(Subset = "ALL") %>% mutate(Phenotype = sub("_mod.*.txt", "", name))
+  resultsgem = bind_rows(resultsgem, temp)
+}
+
+resultsgem<-inner_join(resultsgem, all_varfin1, by="Phenotype") 
+
+
+
+
+```
+
+### Creating the QQ-plots 12ºC Condition GWAS results
+
+```{r eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+#Genomic Inflation Factor
+temp1 = resultsgem %>% 
+        group_by(Phenotype) %>%
+        dplyr::summarize(Genomic_Inflation_Factor = median(qchisq(1-P,1))/qchisq(0.5,1))
+
+temp1
+
+write_csv(temp1, paste0("genome_inflation_factor_", condition[1], "_temperatures_240103_v1.csv"))
+
+#QQ-plots
+
+pdf(file= paste0("qqplots_", condition[1], "_temperatures_240103_v1.pdf"))
+for (i in c(1:length(unique(resultsgem$Phenotype)))){
+  titleqq=unique(resultsgem$Phenotype)[i]
+  temp = resultsgem %>% filter(Phenotype == unique(resultsgem$Phenotype)[i]) %>% dplyr::sample_frac(size = .10) %>% dplyr::select(P) %>% pull()
+  GWASTools::qqPlot(temp, thinThreshold = 2, main=titleqq)
+}
+dev.off()
+
+
+
+```
+
+### Obtaining the Bonferroni thresholds and creating files with significant SNPs for all phenotypes according to the Bonferroni thresholds for 12ºC Condition GWAS results
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+Bonferroni_thresholds = resultsgem %>% dplyr::count(Phenotype) %>%
+  mutate(Bonferroni_threshold = 0.05/n) 
+
+write.csv(Bonferroni_thresholds, paste0("Bonferroni_thresholds_", condition[1], "_temperature_v1.csv"))
+
+
+significant = full_join(resultsgem, Bonferroni_thresholds) %>%
+  filter(P <= Bonferroni_threshold)  %>% 
+  group_by(CHR, BP) %>%
+  dplyr::mutate(Count = n()) %>% 
+  dplyr::mutate(SNP_type = "significant")%>% 
+  ungroup() 
+significant %>%
+  dplyr::select(CHR, BP) %>% 
+  distinct() %>%
+  write_delim(paste0("Significant_GEMMA_", condition[1], "_temperature_v1.tsv"), delim = "\t", col_names = F)
+
+
+
+resultsgem = resultsgem %>% 
+    left_join(., significant) %>%
+    mutate(SNP_type = ifelse(is.na(SNP_type), "Other", SNP_type))  %>%
+    mutate(logP = -log10(P))
+
+
+
+```
+
+### Manhattan plots of all the GWAS for 12ºC Condition
+
+```{r eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+# Manhattan plot function from Alice Feurtey scripts
+
+# Manhattan plots per Condition
+
+phenotypes<-unique(resultsgem$Phenotype)
+
+
+plot_list = list()
+for (condi in phenotypes){
+  axiiis=paste0( condi," (-logP)") 
+    temp = resultsgem %>% filter(Phenotype == condi) %>% filter(CHR <= 13) %>% filter(logP > 2)
+  
+    p=ggplot(temp, aes(x=BP, y=logP)) +
+    geom_point( aes(color=SNP_type), size=1.3) +
+    scale_color_manual(values = c("#bae6f6", "#74cced")) +
+    scale_shape_manual(values =c(1, 19)) +
+    geom_hline(aes(yintercept=-log10(Bonferroni_threshold)),
+               linetype = "dashed", color = "grey20") +
+    theme_bw() +
+    theme( legend.position = "none", panel.border = element_blank(),
+      panel.grid.major.x = element_blank(), panel.grid.minor.x = element_blank(),
+      axis.title.x=element_blank(), axis.text.x=element_blank(),
+      axis.ticks.x=element_blank(),
+      strip.background = element_rect(colour="white", fill="white"),
+      plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+    facet_grid(cols = vars(CHR), scales = "free_x", space = "free_x") +labs(y = str_wrap(axiiis, 25), title=condi)
+
+    plot_list[[condi]] = p
+}
+
+pdf(file="manhattan_12C_temperatures_v1.pdf")
+for (condi in phenotypes){
+  print(plot_list[[condi]])
+}
+dev.off()
+
+
+```
+
+### Take the significant (Bonferroni) SNPs and connect them into "loci" for 12ºC Condition GWAS results
+
+```{r fig.width=5, fig.height=5, eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+
+#Function to gather positions into loci
+from_positions_to_loci <- function(tibble_pos, distance_threshold) {
+  chromosomes = unique(sort(tibble_pos$CHR))
+  temp2 = list()
+  for (i in chromosomes){
+    v = tibble_pos %>%
+      filter(CHR == i) %>%
+      dplyr::select(CHR, BP) %>% 
+      distinct() %>% pull(BP) %>% sort()
+    
+    # Split the vectors into group based on the length threshold
+    temp = split(v, cumsum(c(TRUE, diff(v) >= distance_threshold)))
+    
+    temp2[[i]] =  temp %>% 
+      map_df(enframe, .id = 'Locus_nb') %>% 
+      dplyr::rename(BP = value) %>%
+      dplyr::mutate(CHR = i)
+    
+  }
+  
+  bind_rows(temp2) %>%
+    dplyr::select(CHR, Locus_nb, BP) %>%
+    arrange(CHR, Locus_nb, BP)
+}
+
+distance_threshold = 10000L #Distance between two significant SNPs to include them in the same region
+#For each phenotype, get significant loci from list of positions
+list_loci = list()
+for (j in c(1:length(unique(significant$Phenotype)))) {
+  list_loci[[j]] = from_positions_to_loci(filter(significant, Phenotype == unique(significant$Phenotype)[j]),
+                         distance_threshold) %>%
+    dplyr::mutate(Phenotype = unique(significant$Phenotype)[j])
+}
+#Adding locus info to the table
+significant = full_join(bind_rows(list_loci), significant) %>% 
+  group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::mutate(Locus_length = 1 + max(BP) - min(BP)) %>%
+  ungroup()
+
+
+ggplot(significant, aes(Locus_length)) + 
+  geom_density(fill = "#82c0cc", alpha =.4, col = "#82c0cc") +
+  theme_bw() +
+  labs(title = "Distribution of the length of significant loci for 12C temperature variables", 
+       subtitle = paste0("Significant variants were grouped together if they were closer than ", 
+                                  distance_threshold, " bp."),
+       x = "Length (bp)")
+
+
+
+#Write loci as bed file
+significant %>% dplyr::group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::summarise(Start = min(BP) - 1, Stop = max(BP) + 1) %>%
+  dplyr::select(CHR, Start, Stop, Locus_nb, Phenotype) %>%
+  arrange(CHR, Start) %>%
+  write_delim(file = "Significant_12C_temperature_loci.bed", delim = "\t", col_names = F)
+
+
+
+mycolors <- c(brewer.pal(name="Dark2", n = 8), brewer.pal(name="Paired", n = 6))
+
+
+significant %>% ungroup() %>% filter(CHR <= 13)  %>% ungroup() %>%
+    mutate(logP = -log10(P)) %>% ggplot( aes(x=BP, y=logP, col=var, shape=cond))+ geom_point(size=3, alpha=0.4)+ggtitle("Significant SNPs per chromosome per variable analyzed for 12C Condition")+scale_color_manual(values = mycolors)+facet_wrap(~CHR)
+
+
+```
+
+### Finding significant SNPs using the FDR 10% method for 12ºC Condition GWAS results
+
+As it was done by @dutta2021 .
+
+```{r eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+
+temperaturephenotypes<-unique(resultsgem$Phenotype)
+
+for (tempphen in temperaturephenotypes){
+  temp<- resultsgem %>% filter(Phenotype == tempphen)
+  pvaltemtemp<- temp$P 
+    qobjtemp0.1<- qvalue(p=pvaltemtemp, fdr.level=0.1, lambda=0, pi0.method="smoother")
+  
+    temp = temp  %>% dplyr::mutate(SNP_type2 = as.numeric(qobjtemp0.1$significant))
+    temp$SNP_type2<-as.character(temp$SNP_type2)
+    temp$SNP_type2 <- gsub("0", "Other", temp$SNP_type2)
+    temp$SNP_type2 <- gsub("1", "significant", temp$SNP_type2)  
+    
+  #Concatenate the tables
+    if (tempphen == temperaturephenotypes[[1]]) { 
+      qvalsign0.1res = temp 
+    }
+    else { 
+      qvalsign0.1res = bind_rows(qvalsign0.1res, temp)
+    }
+}
+
+
+
+
+qvalsign0.1res  %>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP) %>% 
+  distinct() %>%
+  write_delim(paste0("Significant_GEMMA_", condition[1],"_temperatures_fdr0.1_v1.tsv"), delim = "\t", col_names = F)
+
+qvalsign0.1res  %>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP, Phenotype) %>% 
+  distinct() %>%
+  write_delim(paste0("Significant_GEMMA_", condition[1],"_temperatureswithphen_fdr0.1_v1.tsv"), delim = "\t", col_names = F)
+
+qvalsign0.1res  %>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP, Phenotype) %>% 
+  distinct() %>% dplyr::select(BP) %>%
+  write_delim(paste0("Significant_GEMMA_", condition[1],"_temperaturesjustpos_fdr0.1_v1.tsv"), delim = "\t", col_names = F)
+
+```
+
+### Finding significant SNPs using the FDR 5% method for 12ºC Condition GWAS results
+
+As it was done by @dutta2021 .
+
+```{r eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+
+temperaturephenotypes<-unique(resultsgem$Phenotype)
+
+for (tempphen in temperaturephenotypes){
+  temp<- resultsgem %>% filter(Phenotype == tempphen)
+  pvaltemtemp<- temp$P 
+    qobjtemp0.05<- qvalue(p=pvaltemtemp, fdr.level=0.05, lambda=0, pi0.method="smoother")
+  
+    temp = temp  %>% dplyr::mutate(SNP_type2 = as.numeric(qobjtemp0.05$significant))
+    temp$SNP_type2<-as.character(temp$SNP_type2)
+    temp$SNP_type2 <- gsub("0", "Other", temp$SNP_type2)
+    temp$SNP_type2 <- gsub("1", "significant", temp$SNP_type2)  
+    
+  #Concatenate the tables
+    if (tempphen == temperaturephenotypes[[1]]) { 
+      qvalsign0.05res = temp 
+    }
+    else { 
+      qvalsign0.05res = bind_rows(qvalsign0.05res, temp)
+    }
+}
+
+
+
+
+qvalsign0.05res  %>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP) %>% 
+  distinct() %>%
+  write_delim(paste0("Significant_GEMMA_", condition[1],"_temperatures_fdr0.05_v1.tsv"), delim = "\t", col_names = F)
+
+
+
+
+```
+
+### Manhattan plots of all the GWAS for 12ºC Condition GWAS results with 10% FDR
+
+```{r eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+
+conditions<-unique(qvalsign0.1res$Phenotype)
+
+plot_list = list()
+for (condi in conditions){
+  axiiis=paste0( condi," (-logP)") 
+    temp = qvalsign0.1res %>% filter(Phenotype == condi) %>% filter(CHR <= 13) %>% filter(logP > 2)
+  
+    p=ggplot(temp, aes(x=BP, y=logP)) +
+    geom_point( aes(color=SNP_type2), size=1.3) +
+    scale_color_manual(values = c("#bae6f6", "#74cced")) +
+    scale_shape_manual(values =c(1, 19)) +
+    geom_hline(aes(yintercept=-log10(Bonferroni_threshold)),
+               linetype = "dashed", color = "grey20") +
+    theme_bw() +
+    theme( legend.position = "none", panel.border = element_blank(),
+      panel.grid.major.x = element_blank(), panel.grid.minor.x = element_blank(),
+      axis.title.x=element_blank(), axis.text.x=element_blank(),
+      axis.ticks.x=element_blank(),
+      strip.background = element_rect(colour="white", fill="white"),
+      plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+    facet_grid(cols = vars(CHR), scales = "free_x", space = "free_x") +labs(y = str_wrap(axiiis, 25), title=condi)
+
+    plot_list[[condi]] = p
+}
+
+pdf(file="manhattan_12C_temperatures_fdr0.1_v1.pdf")
+for (condi in conditions){
+  print(plot_list[[condi]])
+}
+dev.off()
+
+
+
+
+```
+
+### Filtering of significant regions - Distribution of regions for 12ºC Condition GWAS results
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+
+qvalsign0.1res  %>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP, Phenotype) %>% filter(CHR <= 13) %>%
+  distinct() %>%
+  write_delim("Significant_GEMMA_12C_temperaturesphen_fdr0.1_v1.tsv", delim = "\t", col_names = T)
+
+qvalsign0.1res  %>%
+  ungroup() %>% 
+  filter(SNP_type2 == "significant") %>%
+  dplyr::select(CHR, BP, Phenotype, logP, SNP_type, SNP_type2) %>% rename(Bonferroni_significance=SNP_type, FDR_significance=SNP_type2) %>%
+  write_delim(paste0("Significant_GEMMA_", condition[1], "_temperaturesphenlogp_fdr0.1_v1.tsv"), delim = "\t", col_names = T)
+
+
+```
+
+### GWAS plot zoom to observe the genes present in a particular genomic region for 12ºC Condition GWAS results
+
+First, I will just reduce the data frames so it is more easy to manage them. I did by making the -log(P) bigger than 2 and only keeping the information from chromosomes smaller and equal than 13.
+
+The table `genestable2` contains all the genes that share the location of significant SNPs for a particular phenotype. It is the same for `testable2` which contains all the transposable elements (TEs) that share the location of significant SNPs for a particular phenotype.
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+qvalsign0.1res  %>%
+  ungroup() %>%
+  filter(CHR <= 13) %>% filter(logP > 2) %>%
+  write_delim("resultsgemsmaller_12C_temperaturefdr0.1_v1.tsv", delim = "\t", col_names = T)
+  
+
+
+#bonfthr<-read.csv("Bonferroni_thresholds_temperature_final_v2.csv") %>% dplyr::select(-X)
+
+
+resultsgemred<-read_tsv("resultsgemsmaller_12C_temperaturefdr0.1_v1.tsv")
+
+
+
+resultsgemred2<-resultsgemred %>%
+  mutate_at(c("SNP_type2"), ~replace_na(.,"Other")) %>% dplyr::select (-Bonferroni_threshold,-n, -Count) %>% full_join(Bonferroni_thresholds) 
+
+```
+
+```{r eval=FALSE, warning=FALSE, message=FALSE, error=FALSE}
+
+
+resultsgemredall<-resultsgemred2%>% drop_na(CHR)
+
+
+
+```
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+
+plot_gff <- function(gff_name, chromosome, min_coord, max_coord) {
+  gff = read_tsv(gff_name, 
+               col_names = c("CHR", "X1", "type", "Start", "Stop", "X2", "X3", "X4", "Annot"))  %>%
+  separate(col = Annot, into = c("ID", "Parent", "Name"), sep = ";") %>%
+  mutate(ID = str_remove(ID, "ID=")) %>%
+  filter(CHR == chromosome) %>%
+  filter(Start >= min_coord) %>%
+  filter(Stop <= max_coord) %>%
+  mutate(y_value = rank(Start)) %>%
+  arrange(Start)
+
+  
+## If too many genes, organize them
+  if (nrow(gff) > 5) {
+    temp = ceiling(nrow(gff)/5)
+    gff = gff %>% mutate(y_value = rep(c(1:5), temp)[1:nrow(gff)])
+  }
+
+  if (nrow(gff) > 0) {
+    
+  
+## Make plot
+  c = gff %>%
+    ggplot() +
+    geom_segment(mapping = aes(x = Start, xend = Stop, y = y_value, yend = y_value), size = 2) +
+    theme_bw() + 
+    theme(axis.title.y = element_blank(), axis.text.y = element_blank(), 
+          axis.title.x = element_blank(), axis.ticks.y = element_blank(), 
+          panel.grid.minor.y = element_blank(), panel.grid.major.y = element_blank()) +
+    coord_cartesian(xlim = c(min_coord, max_coord), ylim = c(min(gff$y_value) - 0.5, max(gff$y_value) + 0.5))
+
+
+## If there are a reasonable number of genes, 
+# I will also add their name on the plot
+  if (nrow(gff) <= 15) {
+    c = c + geom_text(aes(x = Stop + (max_coord - min_coord)*0.05 , y = y_value, label = ID), size = 2) 
+  }
+
+  c
+
+} else { 
+  print("NULL")
+  }
+
+
+}
+
+
+gene_gff = "z.tritici.IP0323.reannot_SMP_v1.gff3" #Most recent annotation, ONLY GENES
+TE_gff = "IPO323_refTEs_match.gff" # Cecile Lorrain 2021 annotation
+
+signif<- resultsgemred2 %>% filter(SNP_type2 == "significant")
+
+listofphen<-c(unique(signif$Phenotype))
+
+
+from_positions_to_loci <- function(tibble_pos, distance_threshold) {
+  chromosomes = unique(sort(tibble_pos$CHR))
+  temp2 = list()
+  for (i in chromosomes){
+    v = tibble_pos %>%
+      filter(CHR == i) %>%
+      dplyr::select(CHR, BP) %>% 
+      distinct() %>% pull(BP) %>% sort()
+    
+    # Split the vectors into group based on the length threshold
+    temp = split(v, cumsum(c(TRUE, diff(v) >= distance_threshold)))
+    
+    temp2[[i]] =  temp %>% 
+      map_df(enframe, .id = 'Locus_nb') %>% 
+      dplyr::rename(BP = value) %>%
+      dplyr::mutate(CHR = i)
+    
+  }
+  
+  bind_rows(temp2) %>%
+    dplyr::select(CHR, Locus_nb, BP) %>%
+    arrange(CHR, Locus_nb, BP)
+}
+
+#2858
+
+gff1 = read_tsv(gene_gff, 
+                col_names = c("CHR", "X1", "type", "Start", "Stop", "X2", "X3", "X4", "Annot"))  %>%
+    separate(col = Annot, into = c("ID", "Parent", "Name"), sep = ";") %>% group_by(CHR) %>% filter(type=="gene") %>% mutate(Starti=lead(Start)) %>% mutate(lala=Starti-Start) %>% na.omit()
+
+mean(gff1$lala)
+
+distance_threshold = 2800 #Distance between two significant SNPs to include them in the same region
+
+#For each phenotype, get significant loci from list of positions
+list_loci = list()
+for (j in c(1:length(unique(signif$Phenotype)))) {
+  list_loci[[j]] = from_positions_to_loci(filter(signif, Phenotype == unique(signif$Phenotype)[j]),
+                         distance_threshold) %>%
+    dplyr::mutate(Phenotype = unique(signif$Phenotype)[j])
+}
+#Adding locus info to the table
+signif = full_join(bind_rows(list_loci), signif) %>% 
+  group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::mutate(Locus_length = 1 + max(BP) - min(BP)) %>%
+  ungroup()
+
+
+
+
+
+
+plot_list = list()
+
+
+for (condi in listofphen){
+  tempred1<- resultsgemred2 %>% filter(Phenotype == condi)
+  tempred2<- resultsgemred2 %>% filter(Phenotype == condi) %>% filter(SNP_type2 == "significant") %>% ungroup()  
+  
+  chromodifloc<-unique(tempred2$CHR)
+  
+  for (CHRval in chromodifloc){
+    
+    tempred4<- resultsgemred2 %>% filter(Phenotype == condi) %>% filter(SNP_type2 == "significant") %>% filter(CHR == CHRval)
+    pheno=condi
+    chromosome = paste0("chr_", CHRval) 
+    tempred5<-left_join(tempred4, signif)
+    eachloc<-unique(tempred5$Locus_nb)
+      for (locus in eachloc){ 
+        
+        tempred6<-tempred5 %>% filter(Locus_nb == locus)
+        min_coord = (mean(tempred6$BP))-3300
+        max_coord = (mean(tempred6$BP))+3300
+
+ 
+# Prepare the gene section of the plot
+        c = plot_gff(TE_gff, chromosome, min_coord, max_coord) 
+        d = plot_gff(gene_gff, chromosome, min_coord, max_coord)
+
+        if (length(d) == 1 & length(c) == 1){
+        } else {
+# Prepare the GWAS section of the plot for the first phenotype
+          
+          gff1 = read_tsv(gene_gff, 
+               col_names = c("CHR", "X1", "type", "Start", "Stop", "X2", "X3", "X4", "Annot"))  %>%
+                separate(col = Annot, into = c("ID", "Parent", "Name"), sep = ";") %>%
+                mutate(ID = str_remove(ID, "ID=")) %>% 
+                filter(type == "gene") %>%
+                filter(CHR == chromosome) %>%
+                filter(Start >= min_coord) %>%
+                filter(Stop <= max_coord) %>%
+                mutate(y_value = rank(Start))
+          
+            genestable=tibble(gene=gff1$ID, CHR = gff1$CHR, Start=gff1$Start, Stop=gff1$Stop, Phenotype=unique(tempred6$Phenotype))
+          
+          gff2 = read_tsv(TE_gff, 
+               col_names = c("CHR", "X1", "type", "Start", "Stop", "X2", "X3", "X4", "Annot", "a"))  %>%
+                separate(col = Annot, into = c("ID", "Parent", "Name"), sep = ";") %>%
+                mutate(ID = str_remove(ID, "ID=")) %>% 
+                filter(CHR == chromosome) %>%
+                filter(Start >= min_coord) %>%
+                filter(Stop <= max_coord) %>%
+                mutate(y_value = rank(Start))
+          
+            testable=tibble(TE=gff2$ID, CHR = gff2$CHR, Start=gff2$Start, Stop=gff2$Stop, Phenotype=unique(tempred6$Phenotype))
+    
+          if (exists("genestable2") == FALSE) {
+            genestable2=genestable
+          } else {
+            genestable2=full_join(genestable2, genestable)
+          }
+          
+          if (exists("testable2") == FALSE) {
+            testable2=testable
+          } else {
+            testable2=full_join(testable2, testable)
+          }
+            
+            
+          b = tempred1 %>%
+            filter(Phenotype == pheno) %>%
+            filter(CHR == CHRval) %>%
+            filter(BP >= min_coord) %>%
+            filter(BP <= max_coord) %>%
+            mutate(logP = -log10(P)) %>%
+            ggplot() +
+            geom_point(aes(x = BP, y = logP, col = SNP_type2)) +
+              geom_hline(aes(yintercept=-log10(Bonferroni_threshold)),
+                     linetype = "dashed", color = "grey20") +
+            theme_bw() +
+            labs(title = paste0("GWAS: ", pheno),
+               subtitle = paste0("The region is on the chromosome ", CHRval, 
+                               " from ", min_coord, "bp to ", max_coord, "bp.")) +
+            theme(axis.title.x = element_blank(),
+                panel.grid.major =  element_line(color = "grey90"),
+                axis.text = element_text(color = "grey20", size = 9))+
+            coord_cartesian(xlim = c(min_coord, max_coord))
+          
+
+          p=cowplot::plot_grid(b, c, d, ncol = 1, align = 'v', axis = 'lr', rel_heights = c(1, 0.3, 0.3))
+
+          plot_list[[paste0("_",condi, "_", CHRval, "_", locus)]] = p
+          
+        }
+      }
+  }
+}
+
+
+ 
+
+
+
+  
+```
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+pdf(file="genesforallMPtemperaturegenesandtes_fdr0.1_12C_v1.pdf")
+
+for (plot in c(1:(length(plot_list)))){
+    print(plot_list[[plot]])
+    }
+dev.off()
+
+
+
+
+for (i in names(plot_list)){
+    
+    newdat=tibble(Phenotype=print(i), num=1)
+    if (i == names(plot_list)[[1]]) { 
+      newdat2 = newdat 
+    }
+    else { 
+      newdat2 = bind_rows(newdat2, newdat)
+    }
+    
+}
+
+
+
+
+lendenmannannot<-read.csv("QTLLendenmannpapers_SMP_01062023.csv", header=TRUE, sep= ",") %>% rename(chromosome=Chromosome)
+annotationspred<-read.csv("annotationsgenefromnewgff3.csv", header=TRUE, sep= ",")
+total<-inner_join(annotationspred, genestable2)%>%
+  mutate(chromosome = str_remove(chromosome, "chr_")) 
+total$chromosome<-as.numeric((total$chromosome))
+
+
+
+
+totalsub<-total[,-13:-57]
+write_csv(totalsub, "totalsub_genes_GWAS_12C_v1.csv")
+
+
+anti_join(genestable2, totalsub)
+totalsub2<-totalsub %>%
+  filter(duplicated(gene))
+
+repetedgenes<-unique(totalsub2$gene)
+
+totalsub %>% filter(gene %in% repetedgenes)
+
+
+
+chromis<-unique(totalsub$chromosome)
+phenops<-unique(totalsub$Phenotype)
+for (chrm in chromis){
+  for (ph in phenops){
+    totalsubtem=totalsub %>% filter(chromosome == chrm) %>% filter(Phenotype == ph) %>% group_by(chromosome, Phenotype)
+    lendtemp=lendenmannannot %>% filter(chromosome == chrm) 
+    tempi=full_join(totalsubtem, lendtemp) %>% mutate(lendfound= ifelse(BP_est_pos >= start & BP_est_pos <= end, "yes", "no:("))
+    tempi$lendfound<-as.character(tempi$lendfound)
+    if (exists("tempi2") == FALSE) {
+            tempi2=tempi
+          } else {
+            tempi2=full_join(tempi2, tempi)
+          }
+    
+  }
+  
+}
+
+tempi2 %>% filter(lendfound == "yes")
+
+lendenmannannotfromalice<-read.csv("QTLfromAlicepaper_SMP_07062023.csv", header=TRUE, sep= ",")  %>% group_by(Phenotype, Size_interval) %>% dplyr::summarize(QTL_CHR=mean(QTL_CHR), QTL_start=mean(QTL_start), QTL_end=mean(QTL_end), QTL_peak=mean(QTL_peak)) %>% rename(chromosome=QTL_CHR, Phenotype2=Phenotype) %>% ungroup()
+
+signif<- signif %>% rename(chromosome=CHR)
+chromis<-unique(signif$chromosome)
+phenops<-unique(signif$Phenotype)
+for (chrm in chromis){
+  for (ph in phenops){
+    signiftem=signif %>% filter(chromosome == chrm) %>% filter(Phenotype == ph) %>% group_by(chromosome, Phenotype)
+    lendatemp=lendenmannannotfromalice %>% filter(chromosome == chrm) 
+    tempi3=full_join(signiftem, lendatemp) %>% mutate(lendafound= ifelse(BP >= QTL_start & BP <= QTL_end, "yes", "no:("))
+    tempi3$lendafound<-as.character(tempi3$lendafound)
+    if (exists("tempi4") == FALSE) {
+            tempi4=tempi3
+          } else {
+            tempi4=full_join(tempi4, tempi3)
+          }
+  }
+}
+
+tempi4 %>% filter(lendafound == "yes") 
+
+
+```
+
+### Writing .bed files for intersect & snpEff 12ºC condition
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+
+
+GWAS12Csig<-read_tsv("Significant_GEMMA_12C_temperaturesphen_fdr0.1_v1.tsv")
+
+
+significant<-GWAS12Csig
+#Function to gather positions into loci
+from_positions_to_loci <- function(tibble_pos, distance_threshold) {
+  chromosomes = unique(sort(tibble_pos$CHR))
+  temp2 = list()
+  for (i in chromosomes){
+    v = tibble_pos %>%
+      filter(CHR == i) %>%
+      dplyr::select(CHR, BP) %>% 
+      distinct() %>% pull(BP) %>% sort()
+    
+    # Split the vectors into group based on the length threshold
+    temp = split(v, cumsum(c(TRUE, diff(v) >= distance_threshold)))
+    
+    temp2[[i]] =  temp %>% 
+      map_df(enframe, .id = 'Locus_nb') %>% 
+      dplyr::rename(BP = value) %>%
+      dplyr::mutate(CHR = i)
+    
+  }
+  
+  bind_rows(temp2) %>%
+    dplyr::select(CHR, Locus_nb, BP) %>%
+    arrange(CHR, Locus_nb, BP)
+}
+
+distance_threshold = 2800 #Distance between two significant SNPs to include them in the same region
+#For each phenotype, get significant loci from list of positions
+list_loci = list()
+for (j in c(1:length(unique(significant$Phenotype)))) {
+  list_loci[[j]] = from_positions_to_loci(filter(significant, Phenotype == unique(significant$Phenotype)[j]),
+                         distance_threshold) %>%
+    dplyr::mutate(Phenotype = unique(significant$Phenotype)[j])
+}
+#Adding locus info to the table
+significant = full_join(bind_rows(list_loci), significant) %>% 
+  group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::mutate(Locus_length = 1 + max(BP) - min(BP)) %>%
+  ungroup()
+
+
+
+
+
+#Write loci as bed file
+significant %>% dplyr::group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::summarise(Start = min(BP) - 1, Stop = max(BP) + 1) %>%
+  dplyr::select(CHR, Start, Stop, Locus_nb, Phenotype) %>%
+  arrange(CHR, Start) %>%
+  write_delim(file = "Significant_temperature_12C_fdr0.1_loci.bed", delim = "\t", col_names = F)
+
+```
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+resultsgemred<-read_tsv("resultsgemsmaller_12C_temperaturefdr0.1_v1.tsv")
+
+resultsgemred%>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP, Phenotype) %>% filter(CHR <= 13) %>%
+  write_delim("Significant_GEMMA_12C_temperaturesphen_fdr0.1_nodistinct_v1.tsv", delim = "\t", col_names = T)
+
+
+GWAS12Csig<-read_tsv("Significant_GEMMA_12C_temperaturesphen_fdr0.1_nodistinct_v1.tsv")
+
+
+significant<-GWAS12Csig
+#Function to gather positions into loci
+from_positions_to_loci <- function(tibble_pos, distance_threshold) {
+  chromosomes = unique(sort(tibble_pos$CHR))
+  temp2 = list()
+  for (i in chromosomes){
+    v = tibble_pos %>%
+      filter(CHR == i) %>%
+      dplyr::select(CHR, BP) %>% 
+      distinct() %>% pull(BP) %>% sort()
+    
+    # Split the vectors into group based on the length threshold
+    temp = split(v, cumsum(c(TRUE, diff(v) >= distance_threshold)))
+    
+    temp2[[i]] =  temp %>% 
+      map_df(enframe, .id = 'Locus_nb') %>% 
+      dplyr::rename(BP = value) %>%
+      dplyr::mutate(CHR = i)
+    
+  }
+  
+  bind_rows(temp2) %>%
+    dplyr::select(CHR, Locus_nb, BP) %>%
+    arrange(CHR, Locus_nb, BP)
+}
+
+distance_threshold = 2800 #Distance between two significant SNPs to include them in the same region
+#For each phenotype, get significant loci from list of positions
+list_loci = list()
+for (j in c(1:length(unique(significant$Phenotype)))) {
+  list_loci[[j]] = from_positions_to_loci(filter(significant, Phenotype == unique(significant$Phenotype)[j]),
+                         distance_threshold) %>%
+    dplyr::mutate(Phenotype = unique(significant$Phenotype)[j])
+}
+#Adding locus info to the table
+significant = full_join(bind_rows(list_loci), significant) %>% 
+  group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::mutate(Locus_length = 1 + max(BP) - min(BP)) %>%
+  ungroup()
+
+significant%>%
+  write_delim(file = "Significant_temperature_12C_fdr0.1_nodistinct_loci.tsv", delim = "\t", col_names = F)
+
+
+
+#Write loci as bed file
+significant %>% dplyr::group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::summarise(Start = min(BP) - 1, Stop = max(BP) + 1) %>%
+  dplyr::select(CHR, Start, Stop, Locus_nb, Phenotype) %>%
+  arrange(CHR, Start) %>%
+  write_delim(file = "Significant_temperature_12C_fdr0.1_nodistinct_loci.bed", delim = "\t", col_names = F)
+
+
+
+```
+
+## 15ºC
+
+### Load 15ºC Condition GWAS results
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+a<-list.files(path = paste0("./WWC/Phenotyping/", condition[2], "/" ), pattern = ".assoc")
+pathygem=paste0("./WWC/Phenotyping/", condition[2], "/" )
+resultsgem = data.frame()
+for (name in a) {
+  temp = read_tsv(file=paste0(pathygem, name), col_types=c("dcddccdddddd")) %>%   dplyr::select(CHR=chr, BP=ps, P=p_wald) %>% mutate(Subset = "ALL") %>% mutate(Phenotype = sub("_mod.*.txt", "", name))
+  resultsgem = bind_rows(resultsgem, temp)
+}
+
+resultsgem<-inner_join(resultsgem, all_varfin1, by="Phenotype")
+
+```
+
+### Creating the QQ-plots 15ºC Condition GWAS results
+
+```{r eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+#Genomic Inflation Factor
+temp1 = resultsgem %>% 
+        group_by(Phenotype) %>%
+        dplyr::summarize(Genomic_Inflation_Factor = median(qchisq(1-P,1))/qchisq(0.5,1))
+
+temp1
+
+write_csv(temp1, paste0("genome_inflation_factor_", condition[2], "_temperatures_240103_v1.csv"))
+
+#QQ-plots
+
+pdf(file= paste0("qqplots_", condition[2], "_temperatures_240103_v1.pdf"))
+for (i in c(1:length(unique(resultsgem$Phenotype)))){
+  titleqq=unique(resultsgem$Phenotype)[i]
+  temp = resultsgem %>% filter(Phenotype == unique(resultsgem$Phenotype)[i]) %>% dplyr::sample_frac(size = .10) %>% dplyr::select(P) %>% pull()
+  GWASTools::qqPlot(temp, thinThreshold = 2, main=titleqq)
+}
+dev.off()
+
+
+
+```
+
+### Obtaining the Bonferroni thresholds and creating files with significant SNPs for all phenotypes according to the Bonferroni thresholds for 15ºC Condition GWAS results
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+Bonferroni_thresholds = resultsgem %>% dplyr::count(Phenotype) %>%
+  mutate(Bonferroni_threshold = 0.05/n) 
+
+write.csv(Bonferroni_thresholds, paste0("Bonferroni_thresholds_", condition[2], "_temperature_v1.csv"))
+
+
+significant = full_join(resultsgem, Bonferroni_thresholds) %>%
+  filter(P <= Bonferroni_threshold)  %>% 
+  group_by(CHR, BP) %>%
+  dplyr::mutate(Count = n()) %>% 
+  dplyr::mutate(SNP_type = "significant")%>% 
+  ungroup() 
+significant %>%
+  dplyr::select(CHR, BP) %>% 
+  distinct() %>%
+  write_delim(paste0("Significant_GEMMA_", condition[2], "_temperature_v1.tsv"), delim = "\t", col_names = F)
+
+
+
+resultsgem = resultsgem %>% 
+    left_join(., significant) %>%
+    mutate(SNP_type = ifelse(is.na(SNP_type), "Other", SNP_type))  %>%
+    mutate(logP = -log10(P))
+
+
+
+```
+
+### Manhattan plots of all the GWAS for 15ºC Condition
+
+```{r eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+# Manhattan plot function from Alice Feurtey scripts
+
+# Manhattan plots per Condition
+
+phenotypes<-unique(resultsgem$Phenotype)
+
+
+plot_list = list()
+for (condi in phenotypes){
+  axiiis=paste0( condi," (-logP)") 
+    temp = resultsgem %>% filter(Phenotype == condi) %>% filter(CHR <= 13) %>% filter(logP > 2)
+  
+    p=ggplot(temp, aes(x=BP, y=logP)) +
+    geom_point( aes(color=SNP_type), size=1.3) +
+    scale_color_manual(values = c("#94cde0", "#3596b5")) +
+    scale_shape_manual(values =c(1, 19)) +
+    geom_hline(aes(yintercept=-log10(Bonferroni_threshold)),
+               linetype = "dashed", color = "grey20") +
+    theme_bw() +
+    theme( legend.position = "none", panel.border = element_blank(),
+      panel.grid.major.x = element_blank(), panel.grid.minor.x = element_blank(),
+      axis.title.x=element_blank(), axis.text.x=element_blank(),
+      axis.ticks.x=element_blank(),
+      strip.background = element_rect(colour="white", fill="white"),
+      plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+    facet_grid(cols = vars(CHR), scales = "free_x", space = "free_x") +labs(y = str_wrap(axiiis, 25), title=condi)
+
+    plot_list[[condi]] = p
+}
+
+pdf(file= "manhattan_15C_temperatures_v1.pdf")
+for (condi in phenotypes){
+  print(plot_list[[condi]])
+}
+dev.off()
+
+
+```
+
+### Take the significant (Bonferroni) SNPs and connect them into "loci" for 15ºC Condition GWAS results
+
+```{r fig.width=5, fig.height=5, eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+
+#Function to gather positions into loci
+from_positions_to_loci <- function(tibble_pos, distance_threshold) {
+  chromosomes = unique(sort(tibble_pos$CHR))
+  temp2 = list()
+  for (i in chromosomes){
+    v = tibble_pos %>%
+      filter(CHR == i) %>%
+      dplyr::select(CHR, BP) %>% 
+      distinct() %>% pull(BP) %>% sort()
+    
+    # Split the vectors into group based on the length threshold
+    temp = split(v, cumsum(c(TRUE, diff(v) >= distance_threshold)))
+    
+    temp2[[i]] =  temp %>% 
+      map_df(enframe, .id = 'Locus_nb') %>% 
+      dplyr::rename(BP = value) %>%
+      dplyr::mutate(CHR = i)
+    
+  }
+  
+  bind_rows(temp2) %>%
+    dplyr::select(CHR, Locus_nb, BP) %>%
+    arrange(CHR, Locus_nb, BP)
+}
+
+distance_threshold = 10000L #Distance between two significant SNPs to include them in the same region
+#For each phenotype, get significant loci from list of positions
+list_loci = list()
+for (j in c(1:length(unique(significant$Phenotype)))) {
+  list_loci[[j]] = from_positions_to_loci(filter(significant, Phenotype == unique(significant$Phenotype)[j]),
+                         distance_threshold) %>%
+    dplyr::mutate(Phenotype = unique(significant$Phenotype)[j])
+}
+#Adding locus info to the table
+significant = full_join(bind_rows(list_loci), significant) %>% 
+  group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::mutate(Locus_length = 1 + max(BP) - min(BP)) %>%
+  ungroup()
+
+
+ggplot(significant, aes(Locus_length)) + 
+  geom_density(fill = "#82c0cc", alpha =.4, col = "#82c0cc") +
+  theme_bw() +
+  labs(title = "Distribution of the length of significant loci for 15C temperature variables", 
+       subtitle = paste0("Significant variants were grouped together if they were closer than ", 
+                                  distance_threshold, " bp."),
+       x = "Length (bp)")
+
+
+
+#Write loci as bed file
+significant %>% dplyr::group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::summarise(Start = min(BP) - 1, Stop = max(BP) + 1) %>%
+  dplyr::select(CHR, Start, Stop, Locus_nb, Phenotype) %>%
+  arrange(CHR, Start) %>%
+  write_delim(file = "Significant_15C_temperature_loci.bed", delim = "\t", col_names = F)
+
+
+
+mycolors <- c(brewer.pal(name="Dark2", n = 8), brewer.pal(name="Paired", n = 6))
+
+
+significant %>% ungroup() %>% filter(CHR <= 13)  %>% ungroup() %>%
+    mutate(logP = -log10(P)) %>% ggplot( aes(x=BP, y=logP, col=var, shape=cond))+ geom_point(size=3, alpha=0.4)+ggtitle("Significant SNPs per chromosome per variable analyzed for 15C Condition")+scale_color_manual(values = mycolors)+facet_wrap(~CHR)
+
+
+```
+
+### Finding significant SNPs using the FDR 10% method for 15ºC Condition GWAS results
+
+As it was done by @dutta2021 .
+
+```{r eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+
+temperaturephenotypes<-unique(resultsgem$Phenotype)
+
+for (tempphen in temperaturephenotypes){
+  temp<- resultsgem %>% filter(Phenotype == tempphen)
+  pvaltemtemp<- temp$P 
+    qobjtemp0.1<- qvalue(p=pvaltemtemp, fdr.level=0.1, lambda=0, pi0.method="smoother")
+  
+    temp = temp  %>% dplyr::mutate(SNP_type2 = as.numeric(qobjtemp0.1$significant))
+    temp$SNP_type2<-as.character(temp$SNP_type2)
+    temp$SNP_type2 <- gsub("0", "Other", temp$SNP_type2)
+    temp$SNP_type2 <- gsub("1", "significant", temp$SNP_type2)  
+    
+  #Concatenate the tables
+    if (tempphen == temperaturephenotypes[[1]]) { 
+      qvalsign0.1res = temp 
+    }
+    else { 
+      qvalsign0.1res = bind_rows(qvalsign0.1res, temp)
+    }
+}
+
+
+
+
+qvalsign0.1res  %>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP) %>% 
+  distinct() %>%
+  write_delim(paste0("Significant_GEMMA_", condition[2],"_temperatures_fdr0.1_v1.tsv"), delim = "\t", col_names = F)
+
+qvalsign0.1res  %>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP, Phenotype) %>% 
+  distinct() %>%
+  write_delim(paste0("Significant_GEMMA_", condition[2],"_temperatureswithphen_fdr0.1_v1.tsv"), delim = "\t", col_names = F)
+
+qvalsign0.1res  %>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP, Phenotype) %>% 
+  distinct() %>% dplyr::select(BP) %>%
+  write_delim(paste0("Significant_GEMMA_", condition[2],"_temperaturesjustpos_fdr0.1_v1.tsv"), delim = "\t", col_names = F)
+
+
+```
+
+### Finding significant SNPs using the FDR 5% method for 15ºC Condition GWAS results
+
+As it was done by @dutta2021 .
+
+```{r eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+
+temperaturephenotypes<-unique(resultsgem$Phenotype)
+
+for (tempphen in temperaturephenotypes){
+  temp<- resultsgem %>% filter(Phenotype == tempphen)
+  pvaltemtemp<- temp$P 
+    qobjtemp0.05<- qvalue(p=pvaltemtemp, fdr.level=0.05, lambda=0, pi0.method="smoother")
+  
+    temp = temp  %>% dplyr::mutate(SNP_type2 = as.numeric(qobjtemp0.05$significant))
+    temp$SNP_type2<-as.character(temp$SNP_type2)
+    temp$SNP_type2 <- gsub("0", "Other", temp$SNP_type2)
+    temp$SNP_type2 <- gsub("1", "significant", temp$SNP_type2)  
+    
+  #Concatenate the tables
+    if (tempphen == temperaturephenotypes[[1]]) { 
+      qvalsign0.05res = temp 
+    }
+    else { 
+      qvalsign0.05res = bind_rows(qvalsign0.05res, temp)
+    }
+}
+
+
+
+
+qvalsign0.05res  %>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP) %>% 
+  distinct() %>%
+  write_delim(paste0("Significant_GEMMA_", condition[2],"_temperatures_fdr0.05_v1.tsv"), delim = "\t", col_names = F)
+
+
+
+
+```
+
+### Manhattan plots of all the GWAS for 15ºC Condition GWAS results with 10% FDR
+
+```{r eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+
+conditions<-unique(qvalsign0.1res$Phenotype)
+
+plot_list = list()
+for (condi in conditions){
+  axiiis=paste0( condi," (-logP)") 
+    temp = qvalsign0.1res %>% filter(Phenotype == condi) %>% filter(CHR <= 13) %>% filter(logP > 2)
+  
+    p=ggplot(temp, aes(x=BP, y=logP)) +
+    geom_point( aes(color=SNP_type2), size=1.3) +
+    scale_color_manual(values = c("#94cde0", "#3596b5")) +
+    scale_shape_manual(values =c(1, 19)) +
+    geom_hline(aes(yintercept=-log10(Bonferroni_threshold)),
+               linetype = "dashed", color = "grey20") +
+    theme_bw() +
+    theme( legend.position = "none", panel.border = element_blank(),
+      panel.grid.major.x = element_blank(), panel.grid.minor.x = element_blank(),
+      axis.title.x=element_blank(), axis.text.x=element_blank(),
+      axis.ticks.x=element_blank(),
+      strip.background = element_rect(colour="white", fill="white"),
+      plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+    facet_grid(cols = vars(CHR), scales = "free_x", space = "free_x") +labs(y = str_wrap(axiiis, 25), title=condi)
+
+    plot_list[[condi]] = p
+}
+
+pdf(file="manhattan_15C_temperatures_fdr0.1_v1.pdf")
+for (condi in conditions){
+  print(plot_list[[condi]])
+}
+dev.off()
+
+
+
+
+```
+
+### Filtering of significant regions - Distribution of regions for 15ºC Condition GWAS results
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+
+qvalsign0.1res  %>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP, Phenotype) %>% filter(CHR <= 13) %>%
+  distinct() %>%
+  write_delim("Significant_GEMMA_15C_temperaturesphen_fdr0.1_v1.tsv", delim = "\t", col_names = T)
+
+
+qvalsign0.1res  %>%
+  ungroup() %>% 
+  filter(SNP_type2 == "significant") %>%
+  dplyr::select(CHR, BP, Phenotype, logP, SNP_type, SNP_type2) %>% rename(Bonferroni_significance=SNP_type, FDR_significance=SNP_type2) %>%
+  write_delim(paste0("Significant_GEMMA_", condition[2], "_temperaturesphenlogp_fdr0.1_v1.tsv"), delim = "\t", col_names = T)
+
+```
+
+### GWAS plot zoom to observe the genes present in a particular genomic region for 15ºC Condition GWAS results
+
+First, I will just reduce the data frames so it is more easy to manage them. I did by making the -log(P) bigger than 2 and only keeping the information from chromosomes smaller and equal than 13.
+
+The table `genestable2` contains all the genes that share the location of significant SNPs for a particular phenotype. It is the same for `testable2` which contains all the transposable elements (TEs) that share the location of significant SNPs for a particular phenotype.
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+qvalsign0.1res  %>%
+  ungroup() %>%
+  filter(CHR <= 13) %>% filter(logP > 2) %>%
+  write_delim("resultsgemsmaller_15C_temperaturefdr0.1_v1.tsv", delim = "\t", col_names = T)
+  
+
+
+#bonfthr<-read.csv("Bonferroni_thresholds_temperature_final_v2.csv") %>% dplyr::select(-X)
+
+
+resultsgemred<-read_tsv("resultsgemsmaller_15C_temperaturefdr0.1_v1.tsv")
+
+
+
+resultsgemred2<-resultsgemred %>%
+  mutate_at(c("SNP_type2"), ~replace_na(.,"Other")) %>% dplyr::select (-Bonferroni_threshold,-n, -Count) %>% full_join(Bonferroni_thresholds) 
+
+```
+
+```{r eval=FALSE, warning=FALSE, message=FALSE, error=FALSE}
+
+
+resultsgemredall<-resultsgemred2%>% drop_na(CHR)
+
+
+
+```
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+
+plot_gff <- function(gff_name, chromosome, min_coord, max_coord) {
+  gff = read_tsv(gff_name, 
+               col_names = c("CHR", "X1", "type", "Start", "Stop", "X2", "X3", "X4", "Annot"))  %>%
+  separate(col = Annot, into = c("ID", "Parent", "Name"), sep = ";") %>%
+  mutate(ID = str_remove(ID, "ID=")) %>%
+  filter(CHR == chromosome) %>%
+  filter(Start >= min_coord) %>%
+  filter(Stop <= max_coord) %>%
+  mutate(y_value = rank(Start)) %>%
+  arrange(Start)
+
+  
+## If too many genes, organize them
+  if (nrow(gff) > 5) {
+    temp = ceiling(nrow(gff)/5)
+    gff = gff %>% mutate(y_value = rep(c(1:5), temp)[1:nrow(gff)])
+  }
+
+  if (nrow(gff) > 0) {
+    
+  
+## Make plot
+  c = gff %>%
+    ggplot() +
+    geom_segment(mapping = aes(x = Start, xend = Stop, y = y_value, yend = y_value), size = 2) +
+    theme_bw() + 
+    theme(axis.title.y = element_blank(), axis.text.y = element_blank(), 
+          axis.title.x = element_blank(), axis.ticks.y = element_blank(), 
+          panel.grid.minor.y = element_blank(), panel.grid.major.y = element_blank()) +
+    coord_cartesian(xlim = c(min_coord, max_coord), ylim = c(min(gff$y_value) - 0.5, max(gff$y_value) + 0.5))
+
+
+## If there are a reasonable number of genes, 
+# I will also add their name on the plot
+  if (nrow(gff) <= 15) {
+    c = c + geom_text(aes(x = Stop + (max_coord - min_coord)*0.05 , y = y_value, label = ID), size = 2) 
+  }
+
+  c
+
+} else { 
+  print("NULL")
+  }
+
+
+}
+
+
+gene_gff = "z.tritici.IP0323.reannot_SMP_v1.gff3" #Most recent annotation, ONLY GENES
+TE_gff = "IPO323_refTEs_match.gff" # Cecile Lorrain 2021 annotation
+
+signif<- resultsgemred2 %>% filter(SNP_type2 == "significant")
+
+listofphen<-c(unique(signif$Phenotype))
+
+
+from_positions_to_loci <- function(tibble_pos, distance_threshold) {
+  chromosomes = unique(sort(tibble_pos$CHR))
+  temp2 = list()
+  for (i in chromosomes){
+    v = tibble_pos %>%
+      filter(CHR == i) %>%
+      dplyr::select(CHR, BP) %>% 
+      distinct() %>% pull(BP) %>% sort()
+    
+    # Split the vectors into group based on the length threshold
+    temp = split(v, cumsum(c(TRUE, diff(v) >= distance_threshold)))
+    
+    temp2[[i]] =  temp %>% 
+      map_df(enframe, .id = 'Locus_nb') %>% 
+      dplyr::rename(BP = value) %>%
+      dplyr::mutate(CHR = i)
+    
+  }
+  
+  bind_rows(temp2) %>%
+    dplyr::select(CHR, Locus_nb, BP) %>%
+    arrange(CHR, Locus_nb, BP)
+}
+
+#2858
+
+gff1 = read_tsv(gene_gff, 
+                col_names = c("CHR", "X1", "type", "Start", "Stop", "X2", "X3", "X4", "Annot"))  %>%
+    separate(col = Annot, into = c("ID", "Parent", "Name"), sep = ";") %>% group_by(CHR) %>% filter(type=="gene") %>% mutate(Starti=lead(Start)) %>% mutate(lala=Starti-Start) %>% na.omit()
+
+mean(gff1$lala)
+
+distance_threshold = 2800 #Distance between two significant SNPs to include them in the same region
+
+#For each phenotype, get significant loci from list of positions
+list_loci = list()
+for (j in c(1:length(unique(signif$Phenotype)))) {
+  list_loci[[j]] = from_positions_to_loci(filter(signif, Phenotype == unique(signif$Phenotype)[j]),
+                         distance_threshold) %>%
+    dplyr::mutate(Phenotype = unique(signif$Phenotype)[j])
+}
+#Adding locus info to the table
+signif = full_join(bind_rows(list_loci), signif) %>% 
+  group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::mutate(Locus_length = 1 + max(BP) - min(BP)) %>%
+  ungroup()
+
+
+
+
+
+
+plot_list = list()
+
+
+for (condi in listofphen){
+  tempred1<- resultsgemred2 %>% filter(Phenotype == condi)
+  tempred2<- resultsgemred2 %>% filter(Phenotype == condi) %>% filter(SNP_type2 == "significant") %>% ungroup()  
+  
+  chromodifloc<-unique(tempred2$CHR)
+  
+  for (CHRval in chromodifloc){
+    
+    tempred4<- resultsgemred2 %>% filter(Phenotype == condi) %>% filter(SNP_type2 == "significant") %>% filter(CHR == CHRval)
+    pheno=condi
+    chromosome = paste0("chr_", CHRval) 
+    tempred5<-left_join(tempred4, signif)
+    eachloc<-unique(tempred5$Locus_nb)
+      for (locus in eachloc){ 
+        
+        tempred6<-tempred5 %>% filter(Locus_nb == locus)
+        min_coord = (mean(tempred6$BP))-3300
+        max_coord = (mean(tempred6$BP))+3300
+
+ 
+# Prepare the gene section of the plot
+        c = plot_gff(TE_gff, chromosome, min_coord, max_coord) 
+        d = plot_gff(gene_gff, chromosome, min_coord, max_coord)
+
+        if (length(d) == 1 & length(c) == 1){
+        } else {
+# Prepare the GWAS section of the plot for the first phenotype
+          
+          gff1 = read_tsv(gene_gff, 
+               col_names = c("CHR", "X1", "type", "Start", "Stop", "X2", "X3", "X4", "Annot"))  %>%
+                separate(col = Annot, into = c("ID", "Parent", "Name"), sep = ";") %>%
+                mutate(ID = str_remove(ID, "ID=")) %>% 
+                filter(type == "gene") %>%
+                filter(CHR == chromosome) %>%
+                filter(Start >= min_coord) %>%
+                filter(Stop <= max_coord) %>%
+                mutate(y_value = rank(Start))
+          
+            genestable=tibble(gene=gff1$ID, CHR = gff1$CHR, Start=gff1$Start, Stop=gff1$Stop, Phenotype=unique(tempred6$Phenotype))
+          
+          gff2 = read_tsv(TE_gff, 
+               col_names = c("CHR", "X1", "type", "Start", "Stop", "X2", "X3", "X4", "Annot", "a"))  %>%
+                separate(col = Annot, into = c("ID", "Parent", "Name"), sep = ";") %>%
+                mutate(ID = str_remove(ID, "ID=")) %>% 
+                filter(CHR == chromosome) %>%
+                filter(Start >= min_coord) %>%
+                filter(Stop <= max_coord) %>%
+                mutate(y_value = rank(Start))
+          
+            testable=tibble(TE=gff2$ID, CHR = gff2$CHR, Start=gff2$Start, Stop=gff2$Stop, Phenotype=unique(tempred6$Phenotype))
+    
+          if (exists("genestable2") == FALSE) {
+            genestable2=genestable
+          } else {
+            genestable2=full_join(genestable2, genestable)
+          }
+          
+          if (exists("testable2") == FALSE) {
+            testable2=testable
+          } else {
+            testable2=full_join(testable2, testable)
+          }
+            
+            
+          b = tempred1 %>%
+            filter(Phenotype == pheno) %>%
+            filter(CHR == CHRval) %>%
+            filter(BP >= min_coord) %>%
+            filter(BP <= max_coord) %>%
+            mutate(logP = -log10(P)) %>%
+            ggplot() +
+            geom_point(aes(x = BP, y = logP, col = SNP_type2)) +
+              geom_hline(aes(yintercept=-log10(Bonferroni_threshold)),
+                     linetype = "dashed", color = "grey20") +
+            theme_bw() +
+            labs(title = paste0("GWAS: ", pheno),
+               subtitle = paste0("The region is on the chromosome ", CHRval, 
+                               " from ", min_coord, "bp to ", max_coord, "bp.")) +
+            theme(axis.title.x = element_blank(),
+                panel.grid.major =  element_line(color = "grey90"),
+                axis.text = element_text(color = "grey20", size = 9))+
+            coord_cartesian(xlim = c(min_coord, max_coord))
+          
+
+          p=cowplot::plot_grid(b, c, d, ncol = 1, align = 'v', axis = 'lr', rel_heights = c(1, 0.3, 0.3))
+
+          plot_list[[paste0("_",condi, "_", CHRval, "_", locus)]] = p
+          
+        }
+      }
+  }
+}
+
+
+ 
+
+
+
+  
+```
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+pdf(file="genesforallMPtemperaturegenesandtes_fdr0.1_15C_v1.pdf")
+
+for (plot in c(1:(length(plot_list)))){
+    print(plot_list[[plot]])
+    }
+dev.off()
+
+
+
+
+for (i in names(plot_list)){
+    
+    newdat=tibble(Phenotype=print(i), num=1)
+    if (i == names(plot_list)[[1]]) { 
+      newdat2 = newdat 
+    }
+    else { 
+      newdat2 = bind_rows(newdat2, newdat)
+    }
+    
+}
+
+
+
+
+lendenmannannot<-read.csv("QTLLendenmannpapers_SMP_01062023.csv", header=TRUE, sep= ",") %>% rename(chromosome=Chromosome)
+annotationspred<-read.csv("annotationsgenefromnewgff3.csv", header=TRUE, sep= ",")
+total<-inner_join(annotationspred, genestable2)%>%
+  mutate(chromosome = str_remove(chromosome, "chr_")) 
+total$chromosome<-as.numeric((total$chromosome))
+
+
+
+
+totalsub<-total[,-13:-57]
+write_csv(totalsub, "totalsub_genes_GWAS_15C_v1.csv")
+
+
+anti_join(genestable2, totalsub)
+totalsub2<-totalsub %>%
+  filter(duplicated(gene))
+
+repetedgenes<-unique(totalsub2$gene)
+
+totalsub %>% filter(gene %in% repetedgenes)
+
+
+
+chromis<-unique(totalsub$chromosome)
+phenops<-unique(totalsub$Phenotype)
+for (chrm in chromis){
+  for (ph in phenops){
+    totalsubtem=totalsub %>% filter(chromosome == chrm) %>% filter(Phenotype == ph) %>% group_by(chromosome, Phenotype)
+    lendtemp=lendenmannannot %>% filter(chromosome == chrm) 
+    tempi=full_join(totalsubtem, lendtemp) %>% mutate(lendfound= ifelse(BP_est_pos >= start & BP_est_pos <= end, "yes", "no:("))
+    tempi$lendfound<-as.character(tempi$lendfound)
+    if (exists("tempi2") == FALSE) {
+            tempi2=tempi
+          } else {
+            tempi2=full_join(tempi2, tempi)
+          }
+    
+  }
+  
+}
+
+tempi2 %>% filter(lendfound == "yes")
+
+lendenmannannotfromalice<-read.csv("QTLfromAlicepaper_SMP_07062023.csv", header=TRUE, sep= ",")  %>% group_by(Phenotype, Size_interval) %>% dplyr::summarize(QTL_CHR=mean(QTL_CHR), QTL_start=mean(QTL_start), QTL_end=mean(QTL_end), QTL_peak=mean(QTL_peak)) %>% rename(chromosome=QTL_CHR, Phenotype2=Phenotype) %>% ungroup()
+
+signif<- signif %>% rename(chromosome=CHR)
+chromis<-unique(signif$chromosome)
+phenops<-unique(signif$Phenotype)
+for (chrm in chromis){
+  for (ph in phenops){
+    signiftem=signif %>% filter(chromosome == chrm) %>% filter(Phenotype == ph) %>% group_by(chromosome, Phenotype)
+    lendatemp=lendenmannannotfromalice %>% filter(chromosome == chrm) 
+    tempi3=full_join(signiftem, lendatemp) %>% mutate(lendafound= ifelse(BP >= QTL_start & BP <= QTL_end, "yes", "no:("))
+    tempi3$lendafound<-as.character(tempi3$lendafound)
+    if (exists("tempi4") == FALSE) {
+            tempi4=tempi3
+          } else {
+            tempi4=full_join(tempi4, tempi3)
+          }
+  }
+}
+
+tempi4 %>% filter(lendafound == "yes") 
+
+
+```
+
+### Writing .bed files for intersect & snpEff 15ºC condition
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+GWAS15Csig<-read_tsv("Significant_GEMMA_15C_temperaturesphen_fdr0.1_v1.tsv")
+
+
+significant<-GWAS15Csig
+#Function to gather positions into loci
+from_positions_to_loci <- function(tibble_pos, distance_threshold) {
+  chromosomes = unique(sort(tibble_pos$CHR))
+  temp2 = list()
+  for (i in chromosomes){
+    v = tibble_pos %>%
+      filter(CHR == i) %>%
+      dplyr::select(CHR, BP) %>% 
+      distinct() %>% pull(BP) %>% sort()
+    
+    # Split the vectors into group based on the length threshold
+    temp = split(v, cumsum(c(TRUE, diff(v) >= distance_threshold)))
+    
+    temp2[[i]] =  temp %>% 
+      map_df(enframe, .id = 'Locus_nb') %>% 
+      dplyr::rename(BP = value) %>%
+      dplyr::mutate(CHR = i)
+    
+  }
+  
+  bind_rows(temp2) %>%
+    dplyr::select(CHR, Locus_nb, BP) %>%
+    arrange(CHR, Locus_nb, BP)
+}
+
+distance_threshold = 2800 #Distance between two significant SNPs to include them in the same region
+#For each phenotype, get significant loci from list of positions
+list_loci = list()
+for (j in c(1:length(unique(significant$Phenotype)))) {
+  list_loci[[j]] = from_positions_to_loci(filter(significant, Phenotype == unique(significant$Phenotype)[j]),
+                         distance_threshold) %>%
+    dplyr::mutate(Phenotype = unique(significant$Phenotype)[j])
+}
+#Adding locus info to the table
+significant = full_join(bind_rows(list_loci), significant) %>% 
+  group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::mutate(Locus_length = 1 + max(BP) - min(BP)) %>%
+  ungroup()
+
+
+
+
+
+#Write loci as bed file
+significant %>% dplyr::group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::summarise(Start = min(BP) - 1, Stop = max(BP) + 1) %>%
+  dplyr::select(CHR, Start, Stop, Locus_nb, Phenotype) %>%
+  arrange(CHR, Start) %>%
+  write_delim(file = "Significant_temperature_15C_fdr0.1_loci.bed", delim = "\t", col_names = F)
+
+
+```
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+resultsgemred<-read_tsv("resultsgemsmaller_15C_temperaturefdr0.1_v1.tsv")
+
+resultsgemred%>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP, Phenotype) %>% filter(CHR <= 13) %>%
+  write_delim("Significant_GEMMA_15C_temperaturesphen_fdr0.1_nodistinct_v1.tsv", delim = "\t", col_names = T)
+
+
+GWAS15Csig<-read_tsv("Significant_GEMMA_15C_temperaturesphen_fdr0.1_nodistinct_v1.tsv")
+
+
+significant<-GWAS15Csig
+#Function to gather positions into loci
+from_positions_to_loci <- function(tibble_pos, distance_threshold) {
+  chromosomes = unique(sort(tibble_pos$CHR))
+  temp2 = list()
+  for (i in chromosomes){
+    v = tibble_pos %>%
+      filter(CHR == i) %>%
+      dplyr::select(CHR, BP) %>% 
+      distinct() %>% pull(BP) %>% sort()
+    
+    # Split the vectors into group based on the length threshold
+    temp = split(v, cumsum(c(TRUE, diff(v) >= distance_threshold)))
+    
+    temp2[[i]] =  temp %>% 
+      map_df(enframe, .id = 'Locus_nb') %>% 
+      dplyr::rename(BP = value) %>%
+      dplyr::mutate(CHR = i)
+    
+  }
+  
+  bind_rows(temp2) %>%
+    dplyr::select(CHR, Locus_nb, BP) %>%
+    arrange(CHR, Locus_nb, BP)
+}
+
+distance_threshold = 2800 #Distance between two significant SNPs to include them in the same region
+#For each phenotype, get significant loci from list of positions
+list_loci = list()
+for (j in c(1:length(unique(significant$Phenotype)))) {
+  list_loci[[j]] = from_positions_to_loci(filter(significant, Phenotype == unique(significant$Phenotype)[j]),
+                         distance_threshold) %>%
+    dplyr::mutate(Phenotype = unique(significant$Phenotype)[j])
+}
+#Adding locus info to the table
+significant = full_join(bind_rows(list_loci), significant) %>% 
+  group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::mutate(Locus_length = 1 + max(BP) - min(BP)) %>%
+  ungroup()
+
+significant%>%
+  write_delim(file = "Significant_temperature_15C_fdr0.1_nodistinct_loci.tsv", delim = "\t", col_names = F)
+
+
+
+#Write loci as bed file
+significant %>% dplyr::group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::summarise(Start = min(BP) - 1, Stop = max(BP) + 1) %>%
+  dplyr::select(CHR, Start, Stop, Locus_nb, Phenotype) %>%
+  arrange(CHR, Start) %>%
+  write_delim(file = "Significant_temperature_15C_fdr0.1_nodistinct_loci.bed", delim = "\t", col_names = F)
+
+
+
+```
+
+## 22ºC
+
+### Load 22ºC Condition GWAS results
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+a<-list.files(path = paste0("./WWC/Phenotyping/", condition[3], "/" ), pattern = ".assoc")
+pathygem=paste0("./WWC/Phenotyping/", condition[3], "/" )
+resultsgem = data.frame()
+for (name in a) {
+  temp = read_tsv(file=paste0(pathygem, name), col_types=c("dcddccdddddd")) %>%   dplyr::select(CHR=chr, BP=ps, P=p_wald) %>% mutate(Subset = "ALL") %>% mutate(Phenotype = sub("_mod.*.txt", "", name))
+  resultsgem = bind_rows(resultsgem, temp)
+}
+
+resultsgem<-inner_join(resultsgem, all_varfin1, by="Phenotype")
+
+```
+
+### Creating the QQ-plots 22ºC Condition GWAS results
+
+```{r eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+#Genomic Inflation Factor
+temp1 = resultsgem %>% 
+        group_by(Phenotype) %>%
+        dplyr::summarize(Genomic_Inflation_Factor = median(qchisq(1-P,1))/qchisq(0.5,1))
+
+temp1
+
+write_csv(temp1, paste0("genome_inflation_factor_", condition[3], "_temperatures_240103_v2.csv"))
+
+#QQ-plots
+
+pdf(file= paste0("qqplots_", condition[3], "_temperatures_240103_v1.pdf"))
+for (i in c(1:length(unique(resultsgem$Phenotype)))){
+  titleqq=unique(resultsgem$Phenotype)[i]
+  temp = resultsgem %>% filter(Phenotype == unique(resultsgem$Phenotype)[i]) %>% dplyr::sample_frac(size = .10) %>% dplyr::select(P) %>% pull()
+  GWASTools::qqPlot(temp, thinThreshold = 2, main=titleqq)
+}
+dev.off()
+
+
+
+```
+
+### Obtaining the Bonferroni thresholds and creating files with significant SNPs for all phenotypes according to the Bonferroni thresholds for 22ºC Condition GWAS results
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+Bonferroni_thresholds = resultsgem %>% dplyr::count(Phenotype) %>%
+  mutate(Bonferroni_threshold = 0.05/n) 
+
+write.csv(Bonferroni_thresholds, paste0("Bonferroni_thresholds_", condition[3], "_temperature_v1.csv"))
+
+
+significant = full_join(resultsgem, Bonferroni_thresholds) %>%
+  filter(P <= Bonferroni_threshold)  %>% 
+  group_by(CHR, BP) %>%
+  dplyr::mutate(Count = n()) %>% 
+  dplyr::mutate(SNP_type = "significant")%>% 
+  ungroup() 
+significant %>%
+  dplyr::select(CHR, BP) %>% 
+  distinct() %>%
+  write_delim(paste0("Significant_GEMMA_", condition[3], "_temperature_v1.tsv"), delim = "\t", col_names = F)
+
+
+
+resultsgem = resultsgem %>% 
+    left_join(., significant) %>%
+    mutate(SNP_type = ifelse(is.na(SNP_type), "Other", SNP_type))  %>%
+    mutate(logP = -log10(P))
+
+
+
+```
+
+### Manhattan plots of all the GWAS for 22ºC Condition
+
+```{r eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+# Manhattan plot function from Alice Feurtey scripts
+
+# Manhattan plots per Condition
+
+phenotypes<-unique(resultsgem$Phenotype)
+
+
+plot_list = list()
+for (condi in phenotypes){
+  axiiis=paste0( condi," (-logP)") 
+    temp = resultsgem %>% filter(Phenotype == condi) %>% filter(CHR <= 13) %>% filter(logP > 2)
+  
+    p=ggplot(temp, aes(x=BP, y=logP)) +
+    geom_point( aes(color=SNP_type), size=1.3) +
+    scale_color_manual(values = c("#f8afb2", "#f4797d")) +
+    scale_shape_manual(values =c(1, 19)) +
+    geom_hline(aes(yintercept=-log10(Bonferroni_threshold)),
+               linetype = "dashed", color = "grey20") +
+    theme_bw() +
+    theme( legend.position = "none", panel.border = element_blank(),
+      panel.grid.major.x = element_blank(), panel.grid.minor.x = element_blank(),
+      axis.title.x=element_blank(), axis.text.x=element_blank(),
+      axis.ticks.x=element_blank(),
+      strip.background = element_rect(colour="white", fill="white"),
+      plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+    facet_grid(cols = vars(CHR), scales = "free_x", space = "free_x") +labs(y = str_wrap(axiiis, 25), title=condi)
+
+    plot_list[[condi]] = p
+}
+
+pdf(file="manhattan_22C_temperatures_v1.pdf")
+for (condi in phenotypes){
+  print(plot_list[[condi]])
+}
+dev.off()
+
+
+```
+
+### Take the significant (Bonferroni) SNPs and connect them into "loci" for 22ºC Condition GWAS results
+
+```{r fig.width=5, fig.height=5, eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+
+#Function to gather positions into loci
+from_positions_to_loci <- function(tibble_pos, distance_threshold) {
+  chromosomes = unique(sort(tibble_pos$CHR))
+  temp2 = list()
+  for (i in chromosomes){
+    v = tibble_pos %>%
+      filter(CHR == i) %>%
+      dplyr::select(CHR, BP) %>% 
+      distinct() %>% pull(BP) %>% sort()
+    
+    # Split the vectors into group based on the length threshold
+    temp = split(v, cumsum(c(TRUE, diff(v) >= distance_threshold)))
+    
+    temp2[[i]] =  temp %>% 
+      map_df(enframe, .id = 'Locus_nb') %>% 
+      dplyr::rename(BP = value) %>%
+      dplyr::mutate(CHR = i)
+    
+  }
+  
+  bind_rows(temp2) %>%
+    dplyr::select(CHR, Locus_nb, BP) %>%
+    arrange(CHR, Locus_nb, BP)
+}
+
+distance_threshold = 10000L #Distance between two significant SNPs to include them in the same region
+#For each phenotype, get significant loci from list of positions
+list_loci = list()
+for (j in c(1:length(unique(significant$Phenotype)))) {
+  list_loci[[j]] = from_positions_to_loci(filter(significant, Phenotype == unique(significant$Phenotype)[j]),
+                         distance_threshold) %>%
+    dplyr::mutate(Phenotype = unique(significant$Phenotype)[j])
+}
+#Adding locus info to the table
+significant = full_join(bind_rows(list_loci), significant) %>% 
+  group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::mutate(Locus_length = 1 + max(BP) - min(BP)) %>%
+  ungroup()
+
+
+ggplot(significant, aes(Locus_length)) + 
+  geom_density(fill = "#82c0cc", alpha =.4, col = "#82c0cc") +
+  theme_bw() +
+  labs(title = "Distribution of the length of significant loci for 22C temperature variables", 
+       subtitle = paste0("Significant variants were grouped together if they were closer than ", 
+                                  distance_threshold, " bp."),
+       x = "Length (bp)")
+
+
+
+#Write loci as bed file
+significant %>% dplyr::group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::summarise(Start = min(BP) - 1, Stop = max(BP) + 1) %>%
+  dplyr::select(CHR, Start, Stop, Locus_nb, Phenotype) %>%
+  arrange(CHR, Start) %>%
+  write_delim(file = "Significant_22C_temperature_loci.bed", delim = "\t", col_names = F)
+
+
+
+mycolors <- c(brewer.pal(name="Dark2", n = 8), brewer.pal(name="Paired", n = 6))
+
+
+significant %>% ungroup() %>% filter(CHR <= 13)  %>% ungroup() %>%
+    mutate(logP = -log10(P)) %>% ggplot( aes(x=BP, y=logP, col=var, shape=cond))+ geom_point(size=3, alpha=0.4)+ggtitle("Significant SNPs per chromosome per variable analyzed for 22C Condition")+scale_color_manual(values = mycolors)+facet_wrap(~CHR)
+
+
+```
+
+### Finding significant SNPs using the FDR 10% method for 22ºC Condition GWAS results
+
+As it was done by @dutta2021 .
+
+```{r eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+
+temperaturephenotypes<-unique(resultsgem$Phenotype)
+
+for (tempphen in temperaturephenotypes){
+  temp<- resultsgem %>% filter(Phenotype == tempphen)
+  pvaltemtemp<- temp$P 
+    qobjtemp0.1<- qvalue(p=pvaltemtemp, fdr.level=0.1, lambda=0, pi0.method="smoother")
+  
+    temp = temp  %>% dplyr::mutate(SNP_type2 = as.numeric(qobjtemp0.1$significant))
+    temp$SNP_type2<-as.character(temp$SNP_type2)
+    temp$SNP_type2 <- gsub("0", "Other", temp$SNP_type2)
+    temp$SNP_type2 <- gsub("1", "significant", temp$SNP_type2)  
+    
+  #Concatenate the tables
+    if (tempphen == temperaturephenotypes[[1]]) { 
+      qvalsign0.1res = temp 
+    }
+    else { 
+      qvalsign0.1res = bind_rows(qvalsign0.1res, temp)
+    }
+}
+
+
+
+
+qvalsign0.1res  %>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP) %>% 
+  distinct() %>%
+  write_delim(paste0("Significant_GEMMA_", condition[3],"_temperatures_fdr0.1_v1.tsv"), delim = "\t", col_names = F)
+
+qvalsign0.1res  %>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP, Phenotype) %>% 
+  distinct() %>%
+  write_delim(paste0("Significant_GEMMA_", condition[3],"_temperatureswithphen_fdr0.1_v1.tsv"), delim = "\t", col_names = F)
+
+qvalsign0.1res  %>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP, Phenotype) %>% 
+  distinct() %>% dplyr::select(BP) %>%
+  write_delim(paste0("Significant_GEMMA_", condition[3],"_temperaturesjustpos_fdr0.1_v1.tsv"), delim = "\t", col_names = F)
+
+```
+
+### Finding significant SNPs using the FDR 5% method for 22ºC Condition GWAS results
+
+As it was done by @dutta2021 .
+
+```{r eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+
+temperaturephenotypes<-unique(resultsgem$Phenotype)
+
+for (tempphen in temperaturephenotypes){
+  temp<- resultsgem %>% filter(Phenotype == tempphen)
+  pvaltemtemp<- temp$P 
+    qobjtemp0.05<- qvalue(p=pvaltemtemp, fdr.level=0.05, lambda=0, pi0.method="smoother")
+  
+    temp = temp  %>% dplyr::mutate(SNP_type2 = as.numeric(qobjtemp0.05$significant))
+    temp$SNP_type2<-as.character(temp$SNP_type2)
+    temp$SNP_type2 <- gsub("0", "Other", temp$SNP_type2)
+    temp$SNP_type2 <- gsub("1", "significant", temp$SNP_type2)  
+    
+  #Concatenate the tables
+    if (tempphen == temperaturephenotypes[[1]]) { 
+      qvalsign0.05res = temp 
+    }
+    else { 
+      qvalsign0.05res = bind_rows(qvalsign0.05res, temp)
+    }
+}
+
+
+
+
+qvalsign0.05res  %>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP) %>% 
+  distinct() %>%
+  write_delim(paste0("Significant_GEMMA_", condition[3],"_temperatures_fdr0.05_v1.tsv"), delim = "\t", col_names = F)
+
+
+
+
+```
+
+### Manhattan plots of all the GWAS for 22ºC Condition GWAS results with 10% FDR
+
+```{r eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+
+conditions<-unique(qvalsign0.1res$Phenotype)
+
+plot_list = list()
+for (condi in conditions){
+  axiiis=paste0( condi," (-logP)") 
+    temp = qvalsign0.1res %>% filter(Phenotype == condi) %>% filter(CHR <= 13) %>% filter(logP > 2)
+  
+    p=ggplot(temp, aes(x=BP, y=logP)) +
+    geom_point( aes(color=SNP_type2), size=1.3) +
+    scale_color_manual(values = c("#f8afb2", "#f4797d")) +
+    scale_shape_manual(values =c(1, 19)) +
+    geom_hline(aes(yintercept=-log10(Bonferroni_threshold)),
+               linetype = "dashed", color = "grey20") +
+    theme_bw() +
+    theme( legend.position = "none", panel.border = element_blank(),
+      panel.grid.major.x = element_blank(), panel.grid.minor.x = element_blank(),
+      axis.title.x=element_blank(), axis.text.x=element_blank(),
+      axis.ticks.x=element_blank(),
+      strip.background = element_rect(colour="white", fill="white"),
+      plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+    facet_grid(cols = vars(CHR), scales = "free_x", space = "free_x") +labs(y = str_wrap(axiiis, 25), title=condi)
+
+    plot_list[[condi]] = p
+}
+
+pdf(file="manhattan_22C_temperatures_fdr0.1_v1.pdf")
+for (condi in conditions){
+  print(plot_list[[condi]])
+}
+dev.off()
+
+
+
+
+```
+
+### Filtering of significant regions - Distribution of regions for 22ºC Condition GWAS results
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+
+qvalsign0.1res  %>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP, Phenotype) %>% filter(CHR <= 13) %>%
+  distinct() %>%
+  write_delim("Significant_GEMMA_22C_temperaturesphen_fdr0.1_v1.tsv", delim = "\t", col_names = T)
+
+
+qvalsign0.1res  %>%
+  ungroup() %>% 
+  filter(SNP_type2 == "significant") %>%
+  dplyr::select(CHR, BP, Phenotype, logP, SNP_type, SNP_type2) %>% rename(Bonferroni_significance=SNP_type, FDR_significance=SNP_type2) %>%
+  write_delim(paste0("Significant_GEMMA_", condition[3], "_temperaturesphenlogp_fdr0.1_v1.tsv"), delim = "\t", col_names = T)
+
+
+
+```
+
+### GWAS plot zoom to observe the genes present in a particular genomic region for 22ºC Condition GWAS results
+
+First, I will just reduce the data frames so it is more easy to manage them. I did by making the -log(P) bigger than 2 and only keeping the information from chromosomes smaller and equal than 13.
+
+The table `genestable2` contains all the genes that share the location of significant SNPs for a particular phenotype. It is the same for `testable2` which contains all the transposable elements (TEs) that share the location of significant SNPs for a particular phenotype.
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+qvalsign0.1res  %>%
+  ungroup() %>%
+  filter(CHR <= 13) %>% filter(logP > 2) %>%
+  write_delim("resultsgemsmaller_22C_temperaturefdr0.1_v1.tsv", delim = "\t", col_names = T)
+  
+
+
+#bonfthr<-read.csv("Bonferroni_thresholds_temperature_final_v2.csv") %>% dplyr::select(-X)
+
+
+resultsgemred<-read_tsv("resultsgemsmaller_22C_temperaturefdr0.1_v1.tsv")
+
+
+
+resultsgemred2<-resultsgemred %>%
+  mutate_at(c("SNP_type2"), ~replace_na(.,"Other")) %>% dplyr::select (-Bonferroni_threshold,-n, -Count) %>% full_join(Bonferroni_thresholds) 
+
+```
+
+```{r eval=FALSE, warning=FALSE, message=FALSE, error=FALSE}
+
+
+resultsgemredall<-resultsgemred2%>% drop_na(CHR)
+
+
+
+```
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+
+plot_gff <- function(gff_name, chromosome, min_coord, max_coord) {
+  gff = read_tsv(gff_name, 
+               col_names = c("CHR", "X1", "type", "Start", "Stop", "X2", "X3", "X4", "Annot"))  %>%
+  separate(col = Annot, into = c("ID", "Parent", "Name"), sep = ";") %>%
+  mutate(ID = str_remove(ID, "ID=")) %>%
+  filter(CHR == chromosome) %>%
+  filter(Start >= min_coord) %>%
+  filter(Stop <= max_coord) %>%
+  mutate(y_value = rank(Start)) %>%
+  arrange(Start)
+
+  
+## If too many genes, organize them
+  if (nrow(gff) > 5) {
+    temp = ceiling(nrow(gff)/5)
+    gff = gff %>% mutate(y_value = rep(c(1:5), temp)[1:nrow(gff)])
+  }
+
+  if (nrow(gff) > 0) {
+    
+  
+## Make plot
+  c = gff %>%
+    ggplot() +
+    geom_segment(mapping = aes(x = Start, xend = Stop, y = y_value, yend = y_value), size = 2) +
+    theme_bw() + 
+    theme(axis.title.y = element_blank(), axis.text.y = element_blank(), 
+          axis.title.x = element_blank(), axis.ticks.y = element_blank(), 
+          panel.grid.minor.y = element_blank(), panel.grid.major.y = element_blank()) +
+    coord_cartesian(xlim = c(min_coord, max_coord), ylim = c(min(gff$y_value) - 0.5, max(gff$y_value) + 0.5))
+
+
+## If there are a reasonable number of genes, 
+# I will also add their name on the plot
+  if (nrow(gff) <= 15) {
+    c = c + geom_text(aes(x = Stop + (max_coord - min_coord)*0.05 , y = y_value, label = ID), size = 2) 
+  }
+
+  c
+
+} else { 
+  print("NULL")
+  }
+
+
+}
+
+
+gene_gff = "z.tritici.IP0323.reannot_SMP_v1.gff3" #Most recent annotation, ONLY GENES
+TE_gff = "IPO323_refTEs_match.gff" # Cecile Lorrain 2021 annotation
+
+signif<- resultsgemred2 %>% filter(SNP_type2 == "significant")
+
+listofphen<-c(unique(signif$Phenotype))
+
+
+from_positions_to_loci <- function(tibble_pos, distance_threshold) {
+  chromosomes = unique(sort(tibble_pos$CHR))
+  temp2 = list()
+  for (i in chromosomes){
+    v = tibble_pos %>%
+      filter(CHR == i) %>%
+      dplyr::select(CHR, BP) %>% 
+      distinct() %>% pull(BP) %>% sort()
+    
+    # Split the vectors into group based on the length threshold
+    temp = split(v, cumsum(c(TRUE, diff(v) >= distance_threshold)))
+    
+    temp2[[i]] =  temp %>% 
+      map_df(enframe, .id = 'Locus_nb') %>% 
+      dplyr::rename(BP = value) %>%
+      dplyr::mutate(CHR = i)
+    
+  }
+  
+  bind_rows(temp2) %>%
+    dplyr::select(CHR, Locus_nb, BP) %>%
+    arrange(CHR, Locus_nb, BP)
+}
+
+#2858
+
+gff1 = read_tsv(gene_gff, 
+                col_names = c("CHR", "X1", "type", "Start", "Stop", "X2", "X3", "X4", "Annot"))  %>%
+    separate(col = Annot, into = c("ID", "Parent", "Name"), sep = ";") %>% group_by(CHR) %>% filter(type=="gene") %>% mutate(Starti=lead(Start)) %>% mutate(lala=Starti-Start) %>% na.omit()
+
+mean(gff1$lala)
+
+distance_threshold = 2800 #Distance between two significant SNPs to include them in the same region
+
+#For each phenotype, get significant loci from list of positions
+list_loci = list()
+for (j in c(1:length(unique(signif$Phenotype)))) {
+  list_loci[[j]] = from_positions_to_loci(filter(signif, Phenotype == unique(signif$Phenotype)[j]),
+                         distance_threshold) %>%
+    dplyr::mutate(Phenotype = unique(signif$Phenotype)[j])
+}
+#Adding locus info to the table
+signif = full_join(bind_rows(list_loci), signif) %>% 
+  group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::mutate(Locus_length = 1 + max(BP) - min(BP)) %>%
+  ungroup()
+
+
+
+
+
+
+plot_list = list()
+
+
+for (condi in listofphen){
+  tempred1<- resultsgemred2 %>% filter(Phenotype == condi)
+  tempred2<- resultsgemred2 %>% filter(Phenotype == condi) %>% filter(SNP_type2 == "significant") %>% ungroup()  
+  
+  chromodifloc<-unique(tempred2$CHR)
+  
+  for (CHRval in chromodifloc){
+    
+    tempred4<- resultsgemred2 %>% filter(Phenotype == condi) %>% filter(SNP_type2 == "significant") %>% filter(CHR == CHRval)
+    pheno=condi
+    chromosome = paste0("chr_", CHRval) 
+    tempred5<-left_join(tempred4, signif)
+    eachloc<-unique(tempred5$Locus_nb)
+      for (locus in eachloc){ 
+        
+        tempred6<-tempred5 %>% filter(Locus_nb == locus)
+        min_coord = (mean(tempred6$BP))-3300
+        max_coord = (mean(tempred6$BP))+3300
+
+ 
+# Prepare the gene section of the plot
+        c = plot_gff(TE_gff, chromosome, min_coord, max_coord) 
+        d = plot_gff(gene_gff, chromosome, min_coord, max_coord)
+
+        if (length(d) == 1 & length(c) == 1){
+        } else {
+# Prepare the GWAS section of the plot for the first phenotype
+          
+          gff1 = read_tsv(gene_gff, 
+               col_names = c("CHR", "X1", "type", "Start", "Stop", "X2", "X3", "X4", "Annot"))  %>%
+                separate(col = Annot, into = c("ID", "Parent", "Name"), sep = ";") %>%
+                mutate(ID = str_remove(ID, "ID=")) %>% 
+                filter(type == "gene") %>%
+                filter(CHR == chromosome) %>%
+                filter(Start >= min_coord) %>%
+                filter(Stop <= max_coord) %>%
+                mutate(y_value = rank(Start))
+          
+            genestable=tibble(gene=gff1$ID, CHR = gff1$CHR, Start=gff1$Start, Stop=gff1$Stop, Phenotype=unique(tempred6$Phenotype))
+          
+          gff2 = read_tsv(TE_gff, 
+               col_names = c("CHR", "X1", "type", "Start", "Stop", "X2", "X3", "X4", "Annot", "a"))  %>%
+                separate(col = Annot, into = c("ID", "Parent", "Name"), sep = ";") %>%
+                mutate(ID = str_remove(ID, "ID=")) %>% 
+                filter(CHR == chromosome) %>%
+                filter(Start >= min_coord) %>%
+                filter(Stop <= max_coord) %>%
+                mutate(y_value = rank(Start))
+          
+            testable=tibble(TE=gff2$ID, CHR = gff2$CHR, Start=gff2$Start, Stop=gff2$Stop, Phenotype=unique(tempred6$Phenotype))
+    
+          if (exists("genestable2") == FALSE) {
+            genestable2=genestable
+          } else {
+            genestable2=full_join(genestable2, genestable)
+          }
+          
+          if (exists("testable2") == FALSE) {
+            testable2=testable
+          } else {
+            testable2=full_join(testable2, testable)
+          }
+            
+            
+          b = tempred1 %>%
+            filter(Phenotype == pheno) %>%
+            filter(CHR == CHRval) %>%
+            filter(BP >= min_coord) %>%
+            filter(BP <= max_coord) %>%
+            mutate(logP = -log10(P)) %>%
+            ggplot() +
+            geom_point(aes(x = BP, y = logP, col = SNP_type2)) +
+              geom_hline(aes(yintercept=-log10(Bonferroni_threshold)),
+                     linetype = "dashed", color = "grey20") +
+            theme_bw() +
+            labs(title = paste0("GWAS: ", pheno),
+               subtitle = paste0("The region is on the chromosome ", CHRval, 
+                               " from ", min_coord, "bp to ", max_coord, "bp.")) +
+            theme(axis.title.x = element_blank(),
+                panel.grid.major =  element_line(color = "grey90"),
+                axis.text = element_text(color = "grey20", size = 9))+
+            coord_cartesian(xlim = c(min_coord, max_coord))
+          
+
+          p=cowplot::plot_grid(b, c, d, ncol = 1, align = 'v', axis = 'lr', rel_heights = c(1, 0.3, 0.3))
+
+          plot_list[[paste0("_",condi, "_", CHRval, "_", locus)]] = p
+          
+        }
+      }
+  }
+}
+
+
+ 
+
+
+
+  
+```
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+pdf(file="genesforallMPtemperaturegenesandtes_fdr0.1_22C_v1.pdf")
+
+for (plot in c(1:(length(plot_list)))){
+    print(plot_list[[plot]])
+    }
+dev.off()
+
+
+
+
+for (i in names(plot_list)){
+    
+    newdat=tibble(Phenotype=print(i), num=1)
+    if (i == names(plot_list)[[1]]) { 
+      newdat2 = newdat 
+    }
+    else { 
+      newdat2 = bind_rows(newdat2, newdat)
+    }
+    
+}
+
+
+
+
+lendenmannannot<-read.csv("QTLLendenmannpapers_SMP_01062023.csv", header=TRUE, sep= ",") %>% rename(chromosome=Chromosome)
+annotationspred<-read.csv("annotationsgenefromnewgff3.csv", header=TRUE, sep= ",")
+total<-inner_join(annotationspred, genestable2)%>%
+  mutate(chromosome = str_remove(chromosome, "chr_")) 
+total$chromosome<-as.numeric((total$chromosome))
+
+
+
+
+totalsub<-total[,-13:-57]
+write_csv(totalsub, "totalsub_genes_GWAS_22C_v1.csv")
+
+
+anti_join(genestable2, totalsub)
+totalsub2<-totalsub %>%
+  filter(duplicated(gene))
+
+repetedgenes<-unique(totalsub2$gene)
+
+totalsub %>% filter(gene %in% repetedgenes)
+
+
+
+chromis<-unique(totalsub$chromosome)
+phenops<-unique(totalsub$Phenotype)
+for (chrm in chromis){
+  for (ph in phenops){
+    totalsubtem=totalsub %>% filter(chromosome == chrm) %>% filter(Phenotype == ph) %>% group_by(chromosome, Phenotype)
+    lendtemp=lendenmannannot %>% filter(chromosome == chrm) 
+    tempi=full_join(totalsubtem, lendtemp) %>% mutate(lendfound= ifelse(BP_est_pos >= start & BP_est_pos <= end, "yes", "no:("))
+    tempi$lendfound<-as.character(tempi$lendfound)
+    if (exists("tempi2") == FALSE) {
+            tempi2=tempi
+          } else {
+            tempi2=full_join(tempi2, tempi)
+          }
+    
+  }
+  
+}
+
+tempi2 %>% filter(lendfound == "yes")
+
+lendenmannannotfromalice<-read.csv("QTLfromAlicepaper_SMP_07062023.csv", header=TRUE, sep= ",")  %>% group_by(Phenotype, Size_interval) %>% dplyr::summarize(QTL_CHR=mean(QTL_CHR), QTL_start=mean(QTL_start), QTL_end=mean(QTL_end), QTL_peak=mean(QTL_peak)) %>% rename(chromosome=QTL_CHR, Phenotype2=Phenotype) %>% ungroup()
+
+signif<- signif %>% rename(chromosome=CHR)
+chromis<-unique(signif$chromosome)
+phenops<-unique(signif$Phenotype)
+for (chrm in chromis){
+  for (ph in phenops){
+    signiftem=signif %>% filter(chromosome == chrm) %>% filter(Phenotype == ph) %>% group_by(chromosome, Phenotype)
+    lendatemp=lendenmannannotfromalice %>% filter(chromosome == chrm) 
+    tempi3=full_join(signiftem, lendatemp) %>% mutate(lendafound= ifelse(BP >= QTL_start & BP <= QTL_end, "yes", "no:("))
+    tempi3$lendafound<-as.character(tempi3$lendafound)
+    if (exists("tempi4") == FALSE) {
+            tempi4=tempi3
+          } else {
+            tempi4=full_join(tempi4, tempi3)
+          }
+  }
+}
+
+tempi4 %>% filter(lendafound == "yes") 
+
+
+```
+
+### Writing .bed files for intersect & snpEff 22ºC condition
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+GWAS22Csig<-read_tsv("Significant_GEMMA_22C_temperaturesphen_fdr0.1_v1.tsv")
+
+
+significant<-GWAS22Csig
+#Function to gather positions into loci
+from_positions_to_loci <- function(tibble_pos, distance_threshold) {
+  chromosomes = unique(sort(tibble_pos$CHR))
+  temp2 = list()
+  for (i in chromosomes){
+    v = tibble_pos %>%
+      filter(CHR == i) %>%
+      dplyr::select(CHR, BP) %>% 
+      distinct() %>% pull(BP) %>% sort()
+    
+    # Split the vectors into group based on the length threshold
+    temp = split(v, cumsum(c(TRUE, diff(v) >= distance_threshold)))
+    
+    temp2[[i]] =  temp %>% 
+      map_df(enframe, .id = 'Locus_nb') %>% 
+      dplyr::rename(BP = value) %>%
+      dplyr::mutate(CHR = i)
+    
+  }
+  
+  bind_rows(temp2) %>%
+    dplyr::select(CHR, Locus_nb, BP) %>%
+    arrange(CHR, Locus_nb, BP)
+}
+
+distance_threshold = 2800 #Distance between two significant SNPs to include them in the same region
+#For each phenotype, get significant loci from list of positions
+list_loci = list()
+for (j in c(1:length(unique(significant$Phenotype)))) {
+  list_loci[[j]] = from_positions_to_loci(filter(significant, Phenotype == unique(significant$Phenotype)[j]),
+                         distance_threshold) %>%
+    dplyr::mutate(Phenotype = unique(significant$Phenotype)[j])
+}
+#Adding locus info to the table
+significant = full_join(bind_rows(list_loci), significant) %>% 
+  group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::mutate(Locus_length = 1 + max(BP) - min(BP)) %>%
+  ungroup()
+
+
+
+
+
+#Write loci as bed file
+significant %>% dplyr::group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::summarise(Start = min(BP) - 1, Stop = max(BP) + 1) %>%
+  dplyr::select(CHR, Start, Stop, Locus_nb, Phenotype) %>%
+  arrange(CHR, Start) %>%
+  write_delim(file = "Significant_temperature_22C_fdr0.1_loci.bed", delim = "\t", col_names = F)
+
+
+```
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+resultsgemred<-read_tsv("resultsgemsmaller_22C_temperaturefdr0.1_v1.tsv")
+
+resultsgemred%>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP, Phenotype) %>% filter(CHR <= 13) %>%
+  write_delim("Significant_GEMMA_22C_temperaturesphen_fdr0.1_nodistinct_v1.tsv", delim = "\t", col_names = T)
+
+
+GWAS22Csig<-read_tsv("Significant_GEMMA_22C_temperaturesphen_fdr0.1_nodistinct_v1.tsv")
+
+
+significant<-GWAS22Csig
+#Function to gather positions into loci
+from_positions_to_loci <- function(tibble_pos, distance_threshold) {
+  chromosomes = unique(sort(tibble_pos$CHR))
+  temp2 = list()
+  for (i in chromosomes){
+    v = tibble_pos %>%
+      filter(CHR == i) %>%
+      dplyr::select(CHR, BP) %>% 
+      distinct() %>% pull(BP) %>% sort()
+    
+    # Split the vectors into group based on the length threshold
+    temp = split(v, cumsum(c(TRUE, diff(v) >= distance_threshold)))
+    
+    temp2[[i]] =  temp %>% 
+      map_df(enframe, .id = 'Locus_nb') %>% 
+      dplyr::rename(BP = value) %>%
+      dplyr::mutate(CHR = i)
+    
+  }
+  
+  bind_rows(temp2) %>%
+    dplyr::select(CHR, Locus_nb, BP) %>%
+    arrange(CHR, Locus_nb, BP)
+}
+
+distance_threshold = 2800 #Distance between two significant SNPs to include them in the same region
+#For each phenotype, get significant loci from list of positions
+list_loci = list()
+for (j in c(1:length(unique(significant$Phenotype)))) {
+  list_loci[[j]] = from_positions_to_loci(filter(significant, Phenotype == unique(significant$Phenotype)[j]),
+                         distance_threshold) %>%
+    dplyr::mutate(Phenotype = unique(significant$Phenotype)[j])
+}
+#Adding locus info to the table
+significant = full_join(bind_rows(list_loci), significant) %>% 
+  group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::mutate(Locus_length = 1 + max(BP) - min(BP)) %>%
+  ungroup()
+
+significant%>%
+  write_delim(file = "Significant_temperature_22C_fdr0.1_nodistinct_loci.tsv", delim = "\t", col_names = F)
+
+
+
+#Write loci as bed file
+significant %>% dplyr::group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::summarise(Start = min(BP) - 1, Stop = max(BP) + 1) %>%
+  dplyr::select(CHR, Start, Stop, Locus_nb, Phenotype) %>%
+  arrange(CHR, Start) %>%
+  write_delim(file = "Significant_temperature_22C_fdr0.1_nodistinct_loci.bed", delim = "\t", col_names = F)
+
+
+
+```
+
+## 25ºC
+
+### Load 25ºC Condition GWAS results
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+a<-list.files(path = paste0("./WWC/Phenotyping/", condition[4], "/" ), pattern = ".assoc")
+pathygem=paste0("./WWC/Phenotyping/", condition[4], "/" )
+resultsgem = data.frame()
+for (name in a) {
+  temp = read_tsv(file=paste0(pathygem, name), col_types=c("dcddccdddddd")) %>%   dplyr::select(CHR=chr, BP=ps, P=p_wald) %>% mutate(Subset = "ALL") %>% mutate(Phenotype = sub("_mod.*.txt", "", name))
+  resultsgem = bind_rows(resultsgem, temp)
+}
+
+resultsgem<-inner_join(resultsgem, all_varfin1, by="Phenotype")
+
+```
+
+### Creating the QQ-plots 25ºC Condition GWAS results
+
+```{r eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+#Genomic Inflation Factor
+temp1 = resultsgem %>% 
+        group_by(Phenotype) %>%
+        dplyr::summarize(Genomic_Inflation_Factor = median(qchisq(1-P,1))/qchisq(0.5,1))
+
+temp1
+
+write_csv(temp1, paste0("genome_inflation_factor_", condition[4], "_temperatures_240103_v1.csv"))
+
+#QQ-plots
+
+pdf(file= paste0("qqplots_", condition[4], "_temperatures_240103_v1.pdf"))
+for (i in c(1:length(unique(resultsgem$Phenotype)))){
+  titleqq=unique(resultsgem$Phenotype)[i]
+  temp = resultsgem %>% filter(Phenotype == unique(resultsgem$Phenotype)[i]) %>% dplyr::sample_frac(size = .10) %>% dplyr::select(P) %>% pull()
+  GWASTools::qqPlot(temp, thinThreshold = 2, main=titleqq)
+}
+dev.off()
+
+
+
+```
+
+### Obtaining the Bonferroni thresholds and creating files with significant SNPs for all phenotypes according to the Bonferroni thresholds for 25ºC Condition GWAS results
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+Bonferroni_thresholds = resultsgem %>% dplyr::count(Phenotype) %>%
+  mutate(Bonferroni_threshold = 0.05/n) 
+
+write.csv(Bonferroni_thresholds, paste0("Bonferroni_thresholds_", condition[4], "_temperature_v1.csv"))
+
+
+significant = full_join(resultsgem, Bonferroni_thresholds) %>%
+  filter(P <= Bonferroni_threshold)  %>% 
+  group_by(CHR, BP) %>%
+  dplyr::mutate(Count = n()) %>% 
+  dplyr::mutate(SNP_type = "significant")%>% 
+  ungroup() 
+significant %>%
+  dplyr::select(CHR, BP) %>% 
+  distinct() %>%
+  write_delim(paste0("Significant_GEMMA_", condition[4], "_temperature_v1.tsv"), delim = "\t", col_names = F)
+
+
+
+resultsgem = resultsgem %>% 
+    left_join(., significant) %>%
+    mutate(SNP_type = ifelse(is.na(SNP_type), "Other", SNP_type))  %>%
+    mutate(logP = -log10(P))
+
+
+
+```
+
+### Manhattan plots of all the GWAS for 25ºC Condition
+
+```{r eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+# Manhattan plot function from Alice Feurtey scripts
+
+# Manhattan plots per Condition
+
+phenotypes<-unique(resultsgem$Phenotype)
+
+
+plot_list = list()
+for (condi in phenotypes){
+  axiiis=paste0( condi," (-logP)") 
+    temp = resultsgem %>% filter(Phenotype == condi) %>% filter(CHR <= 13) %>% filter(logP > 2)
+  
+    p=ggplot(temp, aes(x=BP, y=logP)) +
+    geom_point( aes(color=SNP_type), size=1.3) +
+    scale_color_manual(values = c("#da878f", "#a5333e")) +
+    scale_shape_manual(values =c(1, 19)) +
+    geom_hline(aes(yintercept=-log10(Bonferroni_threshold)),
+               linetype = "dashed", color = "grey20") +
+    theme_bw() +
+    theme( legend.position = "none", panel.border = element_blank(),
+      panel.grid.major.x = element_blank(), panel.grid.minor.x = element_blank(),
+      axis.title.x=element_blank(), axis.text.x=element_blank(),
+      axis.ticks.x=element_blank(),
+      strip.background = element_rect(colour="white", fill="white"),
+      plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+    facet_grid(cols = vars(CHR), scales = "free_x", space = "free_x") +labs(y = str_wrap(axiiis, 25), title=condi)
+
+    plot_list[[condi]] = p
+}
+
+pdf(file="manhattan_25C_temperatures_v1.pdf")
+for (condi in phenotypes){
+  print(plot_list[[condi]])
+}
+dev.off()
+
+
+```
+
+### Take the significant (Bonferroni) SNPs and connect them into "loci" for 25ºC Condition GWAS results
+
+```{r fig.width=5, fig.height=5, eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+
+#Function to gather positions into loci
+from_positions_to_loci <- function(tibble_pos, distance_threshold) {
+  chromosomes = unique(sort(tibble_pos$CHR))
+  temp2 = list()
+  for (i in chromosomes){
+    v = tibble_pos %>%
+      filter(CHR == i) %>%
+      dplyr::select(CHR, BP) %>% 
+      distinct() %>% pull(BP) %>% sort()
+    
+    # Split the vectors into group based on the length threshold
+    temp = split(v, cumsum(c(TRUE, diff(v) >= distance_threshold)))
+    
+    temp2[[i]] =  temp %>% 
+      map_df(enframe, .id = 'Locus_nb') %>% 
+      dplyr::rename(BP = value) %>%
+      dplyr::mutate(CHR = i)
+    
+  }
+  
+  bind_rows(temp2) %>%
+    dplyr::select(CHR, Locus_nb, BP) %>%
+    arrange(CHR, Locus_nb, BP)
+}
+
+distance_threshold = 10000L #Distance between two significant SNPs to include them in the same region
+#For each phenotype, get significant loci from list of positions
+list_loci = list()
+for (j in c(1:length(unique(significant$Phenotype)))) {
+  list_loci[[j]] = from_positions_to_loci(filter(significant, Phenotype == unique(significant$Phenotype)[j]),
+                         distance_threshold) %>%
+    dplyr::mutate(Phenotype = unique(significant$Phenotype)[j])
+}
+#Adding locus info to the table
+significant = full_join(bind_rows(list_loci), significant) %>% 
+  group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::mutate(Locus_length = 1 + max(BP) - min(BP)) %>%
+  ungroup()
+
+
+ggplot(significant, aes(Locus_length)) + 
+  geom_density(fill = "#82c0cc", alpha =.4, col = "#82c0cc") +
+  theme_bw() +
+  labs(title = "Distribution of the length of significant loci for 25C temperature variables", 
+       subtitle = paste0("Significant variants were grouped together if they were closer than ", 
+                                  distance_threshold, " bp."),
+       x = "Length (bp)")
+
+
+
+#Write loci as bed file
+significant %>% dplyr::group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::summarise(Start = min(BP) - 1, Stop = max(BP) + 1) %>%
+  dplyr::select(CHR, Start, Stop, Locus_nb, Phenotype) %>%
+  arrange(CHR, Start) %>%
+  write_delim(file = "Significant_25C_temperature_loci.bed", delim = "\t", col_names = F)
+
+
+
+mycolors <- c(brewer.pal(name="Dark2", n = 8), brewer.pal(name="Paired", n = 6))
+
+
+significant %>% ungroup() %>% filter(CHR <= 13)  %>% ungroup() %>%
+    mutate(logP = -log10(P)) %>% ggplot( aes(x=BP, y=logP, col=var, shape=cond))+ geom_point(size=3, alpha=0.4)+ggtitle("Significant SNPs per chromosome per variable analyzed for 25C Condition")+scale_color_manual(values = mycolors)+facet_wrap(~CHR)
+
+
+```
+
+### Finding significant SNPs using the FDR 10% method for 25ºC Condition GWAS results
+
+As it was done by @dutta2021 .
+
+```{r eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+
+temperaturephenotypes<-unique(resultsgem$Phenotype)
+
+for (tempphen in temperaturephenotypes){
+  temp<- resultsgem %>% filter(Phenotype == tempphen)
+  pvaltemtemp<- temp$P 
+    qobjtemp0.1<- qvalue(p=pvaltemtemp, fdr.level=0.1, lambda=0, pi0.method="smoother")
+  
+    temp = temp  %>% dplyr::mutate(SNP_type2 = as.numeric(qobjtemp0.1$significant))
+    temp$SNP_type2<-as.character(temp$SNP_type2)
+    temp$SNP_type2 <- gsub("0", "Other", temp$SNP_type2)
+    temp$SNP_type2 <- gsub("1", "significant", temp$SNP_type2)  
+    
+  #Concatenate the tables
+    if (tempphen == temperaturephenotypes[[1]]) { 
+      qvalsign0.1res = temp 
+    }
+    else { 
+      qvalsign0.1res = bind_rows(qvalsign0.1res, temp)
+    }
+}
+
+
+
+
+qvalsign0.1res  %>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP) %>% 
+  distinct() %>%
+  write_delim(paste0("Significant_GEMMA_", condition[4],"_temperatures_fdr0.1_v1.tsv"), delim = "\t", col_names = F)
+
+qvalsign0.1res  %>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP, Phenotype) %>% 
+  distinct() %>%
+  write_delim(paste0("Significant_GEMMA_", condition[4],"_temperatureswithphen_fdr0.1_v1.tsv"), delim = "\t", col_names = F)
+
+
+qvalsign0.1res  %>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP, Phenotype) %>% 
+  distinct() %>% dplyr::select(BP) %>%
+  write_delim(paste0("Significant_GEMMA_", condition[4],"_temperaturesjustpos_fdr0.1_v1.tsv"), delim = "\t", col_names = F)
+
+```
+
+### Finding significant SNPs using the FDR 5% method for 25ºC Condition GWAS results
+
+As it was done by @dutta2021 .
+
+```{r eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+
+temperaturephenotypes<-unique(resultsgem$Phenotype)
+
+for (tempphen in temperaturephenotypes){
+  temp<- resultsgem %>% filter(Phenotype == tempphen)
+  pvaltemtemp<- temp$P 
+    qobjtemp0.05<- qvalue(p=pvaltemtemp, fdr.level=0.05, lambda=0, pi0.method="smoother")
+  
+    temp = temp  %>% dplyr::mutate(SNP_type2 = as.numeric(qobjtemp0.05$significant))
+    temp$SNP_type2<-as.character(temp$SNP_type2)
+    temp$SNP_type2 <- gsub("0", "Other", temp$SNP_type2)
+    temp$SNP_type2 <- gsub("1", "significant", temp$SNP_type2)  
+    
+  #Concatenate the tables
+    if (tempphen == temperaturephenotypes[[1]]) { 
+      qvalsign0.05res = temp 
+    }
+    else { 
+      qvalsign0.05res = bind_rows(qvalsign0.05res, temp)
+    }
+}
+
+
+
+
+qvalsign0.05res  %>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP) %>% 
+  distinct() %>%
+  write_delim(paste0("Significant_GEMMA_", condition[4],"_temperatures_fdr0.05_v1.tsv"), delim = "\t", col_names = F)
+
+
+
+
+```
+
+### Manhattan plots of all the GWAS for 25ºC Condition GWAS results with 10% FDR
+
+```{r eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+
+conditions<-unique(qvalsign0.1res$Phenotype)
+
+plot_list = list()
+for (condi in conditions){
+  axiiis=paste0( condi," (-logP)") 
+    temp = qvalsign0.1res %>% filter(Phenotype == condi) %>% filter(CHR <= 13) %>% filter(logP > 2)
+  
+    p=ggplot(temp, aes(x=BP, y=logP)) +
+    geom_point( aes(color=SNP_type2), size=1.3) +
+    scale_color_manual(values = c("#da878f", "#a5333e")) +
+    scale_shape_manual(values =c(1, 19)) +
+    geom_hline(aes(yintercept=-log10(Bonferroni_threshold)),
+               linetype = "dashed", color = "grey20") +
+    theme_bw() +
+    theme( legend.position = "none", panel.border = element_blank(),
+      panel.grid.major.x = element_blank(), panel.grid.minor.x = element_blank(),
+      axis.title.x=element_blank(), axis.text.x=element_blank(),
+      axis.ticks.x=element_blank(),
+      strip.background = element_rect(colour="white", fill="white"),
+      plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+    facet_grid(cols = vars(CHR), scales = "free_x", space = "free_x") +labs(y = str_wrap(axiiis, 25), title=condi)
+
+    plot_list[[condi]] = p
+}
+
+pdf(file="manhattan_25C_temperatures_fdr0.1_v1.pdf")
+for (condi in conditions){
+  print(plot_list[[condi]])
+}
+dev.off()
+
+
+
+
+```
+
+### Filtering of significant regions - Distribution of regions for 25ºC Condition GWAS results
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+
+qvalsign0.1res  %>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP, Phenotype) %>% filter(CHR <= 13) %>%
+  distinct() %>%
+  write_delim("Significant_GEMMA_25C_temperaturesphen_fdr0.1_v1.tsv", delim = "\t", col_names = T)
+
+
+qvalsign0.1res  %>%
+  ungroup() %>% 
+  filter(SNP_type2 == "significant") %>%
+  dplyr::select(CHR, BP, Phenotype, logP, SNP_type, SNP_type2) %>% rename(Bonferroni_significance=SNP_type, FDR_significance=SNP_type2) %>%
+  write_delim(paste0("Significant_GEMMA_", condition[4], "_temperaturesphenlogp_fdr0.1_v1.tsv"), delim = "\t", col_names = T)
+
+
+
+```
+
+### GWAS plot zoom to observe the genes present in a particular genomic region for 25ºC Condition GWAS results
+
+First, I will just reduce the data frames so it is more easy to manage them. I did by making the -log(P) bigger than 2 and only keeping the information from chromosomes smaller and equal than 13.
+
+The table `genestable2` contains all the genes that share the location of significant SNPs for a particular phenotype. It is the same for `testable2` which contains all the transposable elements (TEs) that share the location of significant SNPs for a particular phenotype.
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+qvalsign0.1res  %>%
+  ungroup() %>%
+  filter(CHR <= 13) %>% filter(logP > 2) %>%
+  write_delim("resultsgemsmaller_25C_temperaturefdr0.1_v1.tsv", delim = "\t", col_names = T)
+  
+
+
+#bonfthr<-read.csv("Bonferroni_thresholds_temperature_final_v2.csv") %>% dplyr::select(-X)
+
+
+resultsgemred<-read_tsv("resultsgemsmaller_25C_temperaturefdr0.1_v1.tsv")
+
+
+
+resultsgemred2<-resultsgemred %>%
+  mutate_at(c("SNP_type2"), ~replace_na(.,"Other")) %>% dplyr::select (-Bonferroni_threshold,-n, -Count) %>% full_join(Bonferroni_thresholds) 
+
+```
+
+```{r eval=FALSE, warning=FALSE, message=FALSE, error=FALSE}
+
+
+resultsgemredall<-resultsgemred2%>% drop_na(CHR)
+
+
+
+```
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+
+plot_gff <- function(gff_name, chromosome, min_coord, max_coord) {
+  gff = read_tsv(gff_name, 
+               col_names = c("CHR", "X1", "type", "Start", "Stop", "X2", "X3", "X4", "Annot"))  %>%
+  separate(col = Annot, into = c("ID", "Parent", "Name"), sep = ";") %>%
+  mutate(ID = str_remove(ID, "ID=")) %>%
+  filter(CHR == chromosome) %>%
+  filter(Start >= min_coord) %>%
+  filter(Stop <= max_coord) %>%
+  mutate(y_value = rank(Start)) %>%
+  arrange(Start)
+
+  
+## If too many genes, organize them
+  if (nrow(gff) > 5) {
+    temp = ceiling(nrow(gff)/5)
+    gff = gff %>% mutate(y_value = rep(c(1:5), temp)[1:nrow(gff)])
+  }
+
+  if (nrow(gff) > 0) {
+    
+  
+## Make plot
+  c = gff %>%
+    ggplot() +
+    geom_segment(mapping = aes(x = Start, xend = Stop, y = y_value, yend = y_value), size = 2) +
+    theme_bw() + 
+    theme(axis.title.y = element_blank(), axis.text.y = element_blank(), 
+          axis.title.x = element_blank(), axis.ticks.y = element_blank(), 
+          panel.grid.minor.y = element_blank(), panel.grid.major.y = element_blank()) +
+    coord_cartesian(xlim = c(min_coord, max_coord), ylim = c(min(gff$y_value) - 0.5, max(gff$y_value) + 0.5))
+
+
+## If there are a reasonable number of genes, 
+# I will also add their name on the plot
+  if (nrow(gff) <= 15) {
+    c = c + geom_text(aes(x = Stop + (max_coord - min_coord)*0.05 , y = y_value, label = ID), size = 2) 
+  }
+
+  c
+
+} else { 
+  print("NULL")
+  }
+
+
+}
+
+
+gene_gff = "z.tritici.IP0323.reannot_SMP_v1.gff3" #Most recent annotation, ONLY GENES
+TE_gff = "IPO323_refTEs_match.gff" # Cecile Lorrain 2021 annotation
+
+signif<- resultsgemred2 %>% filter(SNP_type2 == "significant")
+
+listofphen<-c(unique(signif$Phenotype))
+
+
+from_positions_to_loci <- function(tibble_pos, distance_threshold) {
+  chromosomes = unique(sort(tibble_pos$CHR))
+  temp2 = list()
+  for (i in chromosomes){
+    v = tibble_pos %>%
+      filter(CHR == i) %>%
+      dplyr::select(CHR, BP) %>% 
+      distinct() %>% pull(BP) %>% sort()
+    
+    # Split the vectors into group based on the length threshold
+    temp = split(v, cumsum(c(TRUE, diff(v) >= distance_threshold)))
+    
+    temp2[[i]] =  temp %>% 
+      map_df(enframe, .id = 'Locus_nb') %>% 
+      dplyr::rename(BP = value) %>%
+      dplyr::mutate(CHR = i)
+    
+  }
+  
+  bind_rows(temp2) %>%
+    dplyr::select(CHR, Locus_nb, BP) %>%
+    arrange(CHR, Locus_nb, BP)
+}
+
+#2858
+
+gff1 = read_tsv(gene_gff, 
+                col_names = c("CHR", "X1", "type", "Start", "Stop", "X2", "X3", "X4", "Annot"))  %>%
+    separate(col = Annot, into = c("ID", "Parent", "Name"), sep = ";") %>% group_by(CHR) %>% filter(type=="gene") %>% mutate(Starti=lead(Start)) %>% mutate(lala=Starti-Start) %>% na.omit()
+
+mean(gff1$lala)
+
+distance_threshold = 2800 #Distance between two significant SNPs to include them in the same region
+
+#For each phenotype, get significant loci from list of positions
+list_loci = list()
+for (j in c(1:length(unique(signif$Phenotype)))) {
+  list_loci[[j]] = from_positions_to_loci(filter(signif, Phenotype == unique(signif$Phenotype)[j]),
+                         distance_threshold) %>%
+    dplyr::mutate(Phenotype = unique(signif$Phenotype)[j])
+}
+#Adding locus info to the table
+signif = full_join(bind_rows(list_loci), signif) %>% 
+  group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::mutate(Locus_length = 1 + max(BP) - min(BP)) %>%
+  ungroup()
+
+
+
+
+
+
+plot_list = list()
+
+
+for (condi in listofphen){
+  tempred1<- resultsgemred2 %>% filter(Phenotype == condi)
+  tempred2<- resultsgemred2 %>% filter(Phenotype == condi) %>% filter(SNP_type2 == "significant") %>% ungroup()  
+  
+  chromodifloc<-unique(tempred2$CHR)
+  
+  for (CHRval in chromodifloc){
+    
+    tempred4<- resultsgemred2 %>% filter(Phenotype == condi) %>% filter(SNP_type2 == "significant") %>% filter(CHR == CHRval)
+    pheno=condi
+    chromosome = paste0("chr_", CHRval) 
+    tempred5<-left_join(tempred4, signif)
+    eachloc<-unique(tempred5$Locus_nb)
+      for (locus in eachloc){ 
+        
+        tempred6<-tempred5 %>% filter(Locus_nb == locus)
+        min_coord = (mean(tempred6$BP))-3300
+        max_coord = (mean(tempred6$BP))+3300
+
+ 
+# Prepare the gene section of the plot
+        c = plot_gff(TE_gff, chromosome, min_coord, max_coord) 
+        d = plot_gff(gene_gff, chromosome, min_coord, max_coord)
+
+        if (length(d) == 1 & length(c) == 1){
+        } else {
+# Prepare the GWAS section of the plot for the first phenotype
+          
+          gff1 = read_tsv(gene_gff, 
+               col_names = c("CHR", "X1", "type", "Start", "Stop", "X2", "X3", "X4", "Annot"))  %>%
+                separate(col = Annot, into = c("ID", "Parent", "Name"), sep = ";") %>%
+                mutate(ID = str_remove(ID, "ID=")) %>% 
+                filter(type == "gene") %>%
+                filter(CHR == chromosome) %>%
+                filter(Start >= min_coord) %>%
+                filter(Stop <= max_coord) %>%
+                mutate(y_value = rank(Start))
+          
+            genestable=tibble(gene=gff1$ID, CHR = gff1$CHR, Start=gff1$Start, Stop=gff1$Stop, Phenotype=unique(tempred6$Phenotype))
+          
+          gff2 = read_tsv(TE_gff, 
+               col_names = c("CHR", "X1", "type", "Start", "Stop", "X2", "X3", "X4", "Annot", "a"))  %>%
+                separate(col = Annot, into = c("ID", "Parent", "Name"), sep = ";") %>%
+                mutate(ID = str_remove(ID, "ID=")) %>% 
+                filter(CHR == chromosome) %>%
+                filter(Start >= min_coord) %>%
+                filter(Stop <= max_coord) %>%
+                mutate(y_value = rank(Start))
+          
+            testable=tibble(TE=gff2$ID, CHR = gff2$CHR, Start=gff2$Start, Stop=gff2$Stop, Phenotype=unique(tempred6$Phenotype))
+    
+          if (exists("genestable2") == FALSE) {
+            genestable2=genestable
+          } else {
+            genestable2=full_join(genestable2, genestable)
+          }
+          
+          if (exists("testable2") == FALSE) {
+            testable2=testable
+          } else {
+            testable2=full_join(testable2, testable)
+          }
+            
+            
+          b = tempred1 %>%
+            filter(Phenotype == pheno) %>%
+            filter(CHR == CHRval) %>%
+            filter(BP >= min_coord) %>%
+            filter(BP <= max_coord) %>%
+            mutate(logP = -log10(P)) %>%
+            ggplot() +
+            geom_point(aes(x = BP, y = logP, col = SNP_type2)) +
+              geom_hline(aes(yintercept=-log10(Bonferroni_threshold)),
+                     linetype = "dashed", color = "grey20") +
+            theme_bw() +
+            labs(title = paste0("GWAS: ", pheno),
+               subtitle = paste0("The region is on the chromosome ", CHRval, 
+                               " from ", min_coord, "bp to ", max_coord, "bp.")) +
+            theme(axis.title.x = element_blank(),
+                panel.grid.major =  element_line(color = "grey90"),
+                axis.text = element_text(color = "grey20", size = 9))+
+            coord_cartesian(xlim = c(min_coord, max_coord))
+          
+
+          p=cowplot::plot_grid(b, c, d, ncol = 1, align = 'v', axis = 'lr', rel_heights = c(1, 0.3, 0.3))
+
+          plot_list[[paste0("_",condi, "_", CHRval, "_", locus)]] = p
+          
+        }
+      }
+  }
+}
+
+
+ 
+
+
+
+  
+```
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+pdf(file="genesforallMPtemperaturegenesandtes_fdr0.1_25C_v1.pdf")
+
+for (plot in c(1:(length(plot_list)))){
+    print(plot_list[[plot]])
+    }
+dev.off()
+
+
+
+
+for (i in names(plot_list)){
+    
+    newdat=tibble(Phenotype=print(i), num=1)
+    if (i == names(plot_list)[[1]]) { 
+      newdat2 = newdat 
+    }
+    else { 
+      newdat2 = bind_rows(newdat2, newdat)
+    }
+    
+}
+
+
+
+
+lendenmannannot<-read.csv("QTLLendenmannpapers_SMP_01062023.csv", header=TRUE, sep= ",") %>% rename(chromosome=Chromosome)
+annotationspred<-read.csv("annotationsgenefromnewgff3.csv", header=TRUE, sep= ",")
+total<-inner_join(annotationspred, genestable2)%>%
+  mutate(chromosome = str_remove(chromosome, "chr_")) 
+total$chromosome<-as.numeric((total$chromosome))
+
+
+
+
+totalsub<-total[,-13:-57]
+write_csv(totalsub, "totalsub_genes_GWAS_25C_v1.csv")
+
+
+anti_join(genestable2, totalsub)
+totalsub2<-totalsub %>%
+  filter(duplicated(gene))
+
+repetedgenes<-unique(totalsub2$gene)
+
+totalsub %>% filter(gene %in% repetedgenes)
+
+
+
+chromis<-unique(totalsub$chromosome)
+phenops<-unique(totalsub$Phenotype)
+for (chrm in chromis){
+  for (ph in phenops){
+    totalsubtem=totalsub %>% filter(chromosome == chrm) %>% filter(Phenotype == ph) %>% group_by(chromosome, Phenotype)
+    lendtemp=lendenmannannot %>% filter(chromosome == chrm) 
+    tempi=full_join(totalsubtem, lendtemp) %>% mutate(lendfound= ifelse(BP_est_pos >= start & BP_est_pos <= end, "yes", "no:("))
+    tempi$lendfound<-as.character(tempi$lendfound)
+    if (exists("tempi2") == FALSE) {
+            tempi2=tempi
+          } else {
+            tempi2=full_join(tempi2, tempi)
+          }
+    
+  }
+  
+}
+
+tempi2 %>% filter(lendfound == "yes")
+
+lendenmannannotfromalice<-read.csv("QTLfromAlicepaper_SMP_07062023.csv", header=TRUE, sep= ",")  %>% group_by(Phenotype, Size_interval) %>% dplyr::summarize(QTL_CHR=mean(QTL_CHR), QTL_start=mean(QTL_start), QTL_end=mean(QTL_end), QTL_peak=mean(QTL_peak)) %>% rename(chromosome=QTL_CHR, Phenotype2=Phenotype) %>% ungroup()
+
+signif<- signif %>% rename(chromosome=CHR)
+chromis<-unique(signif$chromosome)
+phenops<-unique(signif$Phenotype)
+for (chrm in chromis){
+  for (ph in phenops){
+    signiftem=signif %>% filter(chromosome == chrm) %>% filter(Phenotype == ph) %>% group_by(chromosome, Phenotype)
+    lendatemp=lendenmannannotfromalice %>% filter(chromosome == chrm) 
+    tempi3=full_join(signiftem, lendatemp) %>% mutate(lendafound= ifelse(BP >= QTL_start & BP <= QTL_end, "yes", "no:("))
+    tempi3$lendafound<-as.character(tempi3$lendafound)
+    if (exists("tempi4") == FALSE) {
+            tempi4=tempi3
+          } else {
+            tempi4=full_join(tempi4, tempi3)
+          }
+  }
+}
+
+tempi4 %>% filter(lendafound == "yes") 
+
+
+```
+
+### Writing .bed files for intersect & snpEff 25ºC condition
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+GWAS25Csig<-read_tsv("Significant_GEMMA_25C_temperaturesphen_fdr0.1_v1.tsv")
+
+
+significant<-GWAS25Csig
+#Function to gather positions into loci
+from_positions_to_loci <- function(tibble_pos, distance_threshold) {
+  chromosomes = unique(sort(tibble_pos$CHR))
+  temp2 = list()
+  for (i in chromosomes){
+    v = tibble_pos %>%
+      filter(CHR == i) %>%
+      dplyr::select(CHR, BP) %>% 
+      distinct() %>% pull(BP) %>% sort()
+    
+    # Split the vectors into group based on the length threshold
+    temp = split(v, cumsum(c(TRUE, diff(v) >= distance_threshold)))
+    
+    temp2[[i]] =  temp %>% 
+      map_df(enframe, .id = 'Locus_nb') %>% 
+      dplyr::rename(BP = value) %>%
+      dplyr::mutate(CHR = i)
+    
+  }
+  
+  bind_rows(temp2) %>%
+    dplyr::select(CHR, Locus_nb, BP) %>%
+    arrange(CHR, Locus_nb, BP)
+}
+
+distance_threshold = 2800 #Distance between two significant SNPs to include them in the same region
+#For each phenotype, get significant loci from list of positions
+list_loci = list()
+for (j in c(1:length(unique(significant$Phenotype)))) {
+  list_loci[[j]] = from_positions_to_loci(filter(significant, Phenotype == unique(significant$Phenotype)[j]),
+                         distance_threshold) %>%
+    dplyr::mutate(Phenotype = unique(significant$Phenotype)[j])
+}
+#Adding locus info to the table
+significant = full_join(bind_rows(list_loci), significant) %>% 
+  group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::mutate(Locus_length = 1 + max(BP) - min(BP)) %>%
+  ungroup()
+
+
+
+
+
+#Write loci as bed file
+significant %>% dplyr::group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::summarise(Start = min(BP) - 1, Stop = max(BP) + 1) %>%
+  dplyr::select(CHR, Start, Stop, Locus_nb, Phenotype) %>%
+  arrange(CHR, Start) %>%
+  write_delim(file = "Significant_temperature_25C_fdr0.1_loci.bed", delim = "\t", col_names = F)
+
+
+```
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+resultsgemred<-read_tsv("resultsgemsmaller_25C_temperaturefdr0.1_v1.tsv")
+
+resultsgemred%>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP, Phenotype) %>% filter(CHR <= 13) %>%
+  write_delim("Significant_GEMMA_25C_temperaturesphen_fdr0.1_nodistinct_v1.tsv", delim = "\t", col_names = T)
+
+
+GWAS25Csig<-read_tsv("Significant_GEMMA_25C_temperaturesphen_fdr0.1_nodistinct_v1.tsv")
+
+
+significant<-GWAS25Csig
+#Function to gather positions into loci
+from_positions_to_loci <- function(tibble_pos, distance_threshold) {
+  chromosomes = unique(sort(tibble_pos$CHR))
+  temp2 = list()
+  for (i in chromosomes){
+    v = tibble_pos %>%
+      filter(CHR == i) %>%
+      dplyr::select(CHR, BP) %>% 
+      distinct() %>% pull(BP) %>% sort()
+    
+    # Split the vectors into group based on the length threshold
+    temp = split(v, cumsum(c(TRUE, diff(v) >= distance_threshold)))
+    
+    temp2[[i]] =  temp %>% 
+      map_df(enframe, .id = 'Locus_nb') %>% 
+      dplyr::rename(BP = value) %>%
+      dplyr::mutate(CHR = i)
+    
+  }
+  
+  bind_rows(temp2) %>%
+    dplyr::select(CHR, Locus_nb, BP) %>%
+    arrange(CHR, Locus_nb, BP)
+}
+
+distance_threshold = 2800 #Distance between two significant SNPs to include them in the same region
+#For each phenotype, get significant loci from list of positions
+list_loci = list()
+for (j in c(1:length(unique(significant$Phenotype)))) {
+  list_loci[[j]] = from_positions_to_loci(filter(significant, Phenotype == unique(significant$Phenotype)[j]),
+                         distance_threshold) %>%
+    dplyr::mutate(Phenotype = unique(significant$Phenotype)[j])
+}
+#Adding locus info to the table
+significant = full_join(bind_rows(list_loci), significant) %>% 
+  group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::mutate(Locus_length = 1 + max(BP) - min(BP)) %>%
+  ungroup()
+
+significant%>%
+  write_delim(file = "Significant_temperature_25C_fdr0.1_nodistinct_loci.tsv", delim = "\t", col_names = F)
+
+
+
+#Write loci as bed file
+significant %>% dplyr::group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::summarise(Start = min(BP) - 1, Stop = max(BP) + 1) %>%
+  dplyr::select(CHR, Start, Stop, Locus_nb, Phenotype) %>%
+  arrange(CHR, Start) %>%
+  write_delim(file = "Significant_temperature_25C_fdr0.1_nodistinct_loci.bed", delim = "\t", col_names = F)
+
+
+
+```
+
+## 18ºC
+
+### Load 18ºC Condition GWAS results
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+a<-list.files(path = paste0("./WWC/Phenotyping/", condition[5], "/" ), pattern = ".assoc")
+pathygem=paste0("./WWC/Phenotyping/", condition[5], "/" )
+resultsgem = data.frame()
+for (name in a) {
+  temp = read_tsv(file=paste0(pathygem, name), col_types=c("dcddccdddddd")) %>%   dplyr::select(CHR=chr, BP=ps, P=p_wald) %>% mutate(Subset = "ALL") %>% mutate(Phenotype = sub("_mod.*.txt", "", name))
+  resultsgem = bind_rows(resultsgem, temp)
+}
+
+resultsgem<-inner_join(resultsgem, all_varfin1, by="Phenotype")
+
+```
+
+### Creating the QQ-plots 18ºC Condition GWAS results
+
+```{r eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+#Genomic Inflation Factor
+temp1 = resultsgem %>% 
+        group_by(Phenotype) %>%
+        dplyr::summarize(Genomic_Inflation_Factor = median(qchisq(1-P,1))/qchisq(0.5,1))
+
+temp1
+
+write_csv(temp1, paste0("genome_inflation_factor_", condition[5], "_temperatures_240103_v1.csv"))
+
+#QQ-plots
+
+pdf(file= paste0("qqplots_", condition[5], "_temperatures_240103_v1.pdf"))
+for (i in c(1:length(unique(resultsgem$Phenotype)))){
+  titleqq=unique(resultsgem$Phenotype)[i]
+  temp = resultsgem %>% filter(Phenotype == unique(resultsgem$Phenotype)[i]) %>% dplyr::sample_frac(size = .10) %>% dplyr::select(P) %>% pull()
+  GWASTools::qqPlot(temp, thinThreshold = 2, main=titleqq)
+}
+dev.off()
+
+
+
+```
+
+### Obtaining the Bonferroni thresholds and creating files with significant SNPs for all phenotypes according to the Bonferroni thresholds for 18ºC Condition GWAS results
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+Bonferroni_thresholds = resultsgem %>% dplyr::count(Phenotype) %>%
+  mutate(Bonferroni_threshold = 0.05/n) 
+
+write.csv(Bonferroni_thresholds, paste0("Bonferroni_thresholds_", condition[5], "_temperature_v1.csv"))
+
+
+significant = full_join(resultsgem, Bonferroni_thresholds) %>%
+  filter(P <= Bonferroni_threshold)  %>% 
+  group_by(CHR, BP) %>%
+  dplyr::mutate(Count = n()) %>% 
+  dplyr::mutate(SNP_type = "significant")%>% 
+  ungroup() 
+significant %>%
+  dplyr::select(CHR, BP) %>% 
+  distinct() %>%
+  write_delim(paste0("Significant_GEMMA_", condition[5], "_temperature_v1.tsv"), delim = "\t", col_names = F)
+
+
+
+resultsgem = resultsgem %>% 
+    left_join(., significant) %>%
+    mutate(SNP_type = ifelse(is.na(SNP_type), "Other", SNP_type))  %>%
+    mutate(logP = -log10(P))
+
+
+
+```
+
+### Manhattan plots of all the GWAS for 18ºC Condition
+
+```{r eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+# Manhattan plot function from Alice Feurtey scripts
+
+# Manhattan plots per Condition
+
+phenotypes<-unique(resultsgem$Phenotype)
+
+
+plot_list = list()
+for (condi in phenotypes){
+  axiiis=paste0( condi," (-logP)") 
+    temp = resultsgem %>% filter(Phenotype == condi) %>% filter(CHR <= 13) %>% filter(logP > 2)
+  
+    p=ggplot(temp, aes(x=BP, y=logP)) +
+    geom_point( aes(color=SNP_type), size=1.3) +
+    scale_color_manual(values = c("#c699c2", "#955490")) +
+    scale_shape_manual(values =c(1, 19)) +
+    geom_hline(aes(yintercept=-log10(Bonferroni_threshold)),
+               linetype = "dashed", color = "grey20") +
+    theme_bw() +
+    theme( legend.position = "none", panel.border = element_blank(),
+      panel.grid.major.x = element_blank(), panel.grid.minor.x = element_blank(),
+      axis.title.x=element_blank(), axis.text.x=element_blank(),
+      axis.ticks.x=element_blank(),
+      strip.background = element_rect(colour="white", fill="white"),
+      plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+    facet_grid(cols = vars(CHR), scales = "free_x", space = "free_x") +labs(y = str_wrap(axiiis, 25), title=condi)
+
+    plot_list[[condi]] = p
+}
+
+pdf(file="manhattan_18C_temperatures_v1.pdf")
+for (condi in phenotypes){
+  print(plot_list[[condi]])
+}
+dev.off()
+
+
+```
+
+### Take the significant (Bonferroni) SNPs and connect them into "loci" for 18ºC Condition GWAS results
+
+```{r fig.width=5, fig.height=5, eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+
+#Function to gather positions into loci
+from_positions_to_loci <- function(tibble_pos, distance_threshold) {
+  chromosomes = unique(sort(tibble_pos$CHR))
+  temp2 = list()
+  for (i in chromosomes){
+    v = tibble_pos %>%
+      filter(CHR == i) %>%
+      dplyr::select(CHR, BP) %>% 
+      distinct() %>% pull(BP) %>% sort()
+    
+    # Split the vectors into group based on the length threshold
+    temp = split(v, cumsum(c(TRUE, diff(v) >= distance_threshold)))
+    
+    temp2[[i]] =  temp %>% 
+      map_df(enframe, .id = 'Locus_nb') %>% 
+      dplyr::rename(BP = value) %>%
+      dplyr::mutate(CHR = i)
+    
+  }
+  
+  bind_rows(temp2) %>%
+    dplyr::select(CHR, Locus_nb, BP) %>%
+    arrange(CHR, Locus_nb, BP)
+}
+
+distance_threshold = 10000L #Distance between two significant SNPs to include them in the same region
+#For each phenotype, get significant loci from list of positions
+list_loci = list()
+for (j in c(1:length(unique(significant$Phenotype)))) {
+  list_loci[[j]] = from_positions_to_loci(filter(significant, Phenotype == unique(significant$Phenotype)[j]),
+                         distance_threshold) %>%
+    dplyr::mutate(Phenotype = unique(significant$Phenotype)[j])
+}
+#Adding locus info to the table
+significant = full_join(bind_rows(list_loci), significant) %>% 
+  group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::mutate(Locus_length = 1 + max(BP) - min(BP)) %>%
+  ungroup()
+
+
+ggplot(significant, aes(Locus_length)) + 
+  geom_density(fill = "#82c0cc", alpha =.4, col = "#82c0cc") +
+  theme_bw() +
+  labs(title = "Distribution of the length of significant loci for 18C temperature variables", 
+       subtitle = paste0("Significant variants were grouped together if they were closer than ", 
+                                  distance_threshold, " bp."),
+       x = "Length (bp)")
+
+
+
+#Write loci as bed file
+significant %>% dplyr::group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::summarise(Start = min(BP) - 1, Stop = max(BP) + 1) %>%
+  dplyr::select(CHR, Start, Stop, Locus_nb, Phenotype) %>%
+  arrange(CHR, Start) %>%
+  write_delim(file = "Significant_18C_temperature_loci.bed", delim = "\t", col_names = F)
+
+
+
+mycolors <- c(brewer.pal(name="Dark2", n = 8), brewer.pal(name="Paired", n = 6))
+
+
+significant %>% ungroup() %>% filter(CHR <= 13)  %>% ungroup() %>%
+    mutate(logP = -log10(P)) %>% ggplot( aes(x=BP, y=logP, col=var, shape=cond))+ geom_point(size=3, alpha=0.4)+ggtitle("Significant SNPs per chromosome per variable analyzed for 18C Condition")+scale_color_manual(values = mycolors)+facet_wrap(~CHR)
+
+
+```
+
+### Finding significant SNPs using the FDR 10% method for 18ºC Condition GWAS results
+
+As it was done by @dutta2021 .
+
+```{r eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+
+temperaturephenotypes<-unique(resultsgem$Phenotype)
+
+for (tempphen in temperaturephenotypes){
+  temp<- resultsgem %>% filter(Phenotype == tempphen)
+  pvaltemtemp<- temp$P 
+    qobjtemp0.1<- qvalue(p=pvaltemtemp, fdr.level=0.1, lambda=0, pi0.method="smoother")
+  
+    temp = temp  %>% dplyr::mutate(SNP_type2 = as.numeric(qobjtemp0.1$significant))
+    temp$SNP_type2<-as.character(temp$SNP_type2)
+    temp$SNP_type2 <- gsub("0", "Other", temp$SNP_type2)
+    temp$SNP_type2 <- gsub("1", "significant", temp$SNP_type2)  
+    
+  #Concatenate the tables
+    if (tempphen == temperaturephenotypes[[1]]) { 
+      qvalsign0.1res = temp 
+    }
+    else { 
+      qvalsign0.1res = bind_rows(qvalsign0.1res, temp)
+    }
+}
+
+
+
+
+qvalsign0.1res  %>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP) %>% 
+  distinct() %>%
+  write_delim(paste0("Significant_GEMMA_", condition[5],"_temperatures_fdr0.1_v1.tsv"), delim = "\t", col_names = F)
+
+qvalsign0.1res  %>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP, Phenotype) %>% 
+  distinct() %>%
+  write_delim(paste0("Significant_GEMMA_", condition[5],"_temperatureswithphen_fdr0.1_v1.tsv"), delim = "\t", col_names = F)
+
+
+qvalsign0.1res  %>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP, Phenotype) %>% 
+  distinct() %>% dplyr::select(BP) %>%
+  write_delim(paste0("Significant_GEMMA_", condition[5],"_temperaturesjustpos_fdr0.1_v1.tsv"), delim = "\t", col_names = F)
+
+```
+
+### Finding significant SNPs using the FDR 5% method for 18ºC Condition GWAS results
+
+As it was done by @dutta2021 .
+
+```{r eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+
+temperaturephenotypes<-unique(resultsgem$Phenotype)
+
+for (tempphen in temperaturephenotypes){
+  temp<- resultsgem %>% filter(Phenotype == tempphen)
+  pvaltemtemp<- temp$P 
+    qobjtemp0.05<- qvalue(p=pvaltemtemp, fdr.level=0.05, lambda=0, pi0.method="smoother")
+  
+    temp = temp  %>% dplyr::mutate(SNP_type2 = as.numeric(qobjtemp0.05$significant))
+    temp$SNP_type2<-as.character(temp$SNP_type2)
+    temp$SNP_type2 <- gsub("0", "Other", temp$SNP_type2)
+    temp$SNP_type2 <- gsub("1", "significant", temp$SNP_type2)  
+    
+  #Concatenate the tables
+    if (tempphen == temperaturephenotypes[[1]]) { 
+      qvalsign0.05res = temp 
+    }
+    else { 
+      qvalsign0.05res = bind_rows(qvalsign0.05res, temp)
+    }
+}
+
+
+
+
+qvalsign0.05res  %>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP) %>% 
+  distinct() %>%
+  write_delim(paste0("Significant_GEMMA_", condition[5],"_temperatures_fdr0.05_v1.tsv"), delim = "\t", col_names = F)
+
+
+
+
+```
+
+### Manhattan plots of all the GWAS for 18ºC Condition GWAS results with 10% FDR
+
+```{r eval=FALSE, message=FALSE, error=FALSE, warning=FALSE}
+
+conditions<-unique(qvalsign0.1res$Phenotype)
+
+plot_list = list()
+for (condi in conditions){
+  axiiis=paste0( condi," (-logP)") 
+    temp = qvalsign0.1res %>% filter(Phenotype == condi) %>% filter(CHR <= 13) %>% filter(logP > 2)
+  
+    p=ggplot(temp, aes(x=BP, y=logP)) +
+    geom_point( aes(color=SNP_type2), size=1.3) +
+    scale_color_manual(values = c("#c699c2", "#955490")) +
+    scale_shape_manual(values =c(1, 19)) +
+    geom_hline(aes(yintercept=-log10(Bonferroni_threshold)),
+               linetype = "dashed", color = "grey20") +
+    theme_bw() +
+    theme( legend.position = "none", panel.border = element_blank(),
+      panel.grid.major.x = element_blank(), panel.grid.minor.x = element_blank(),
+      axis.title.x=element_blank(), axis.text.x=element_blank(),
+      axis.ticks.x=element_blank(),
+      strip.background = element_rect(colour="white", fill="white"),
+      plot.margin = unit(c(0, 0, 0, 0), "cm")) +
+    facet_grid(cols = vars(CHR), scales = "free_x", space = "free_x") +labs(y = str_wrap(axiiis, 25), title=condi)
+
+    plot_list[[condi]] = p
+}
+
+pdf(file="manhattan_18C_temperatures_fdr0.1_v1.pdf")
+for (condi in conditions){
+  print(plot_list[[condi]])
+}
+dev.off()
+
+
+
+
+```
+
+### Filtering of significant regions - Distribution of regions for 18ºC Condition GWAS results
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+
+qvalsign0.1res  %>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP, Phenotype) %>% filter(CHR <= 13) %>%
+  distinct() %>%
+  write_delim("Significant_GEMMA_18C_temperaturesphen_fdr0.1_v1.tsv", delim = "\t", col_names = T)
+
+qvalsign0.1res  %>%
+  ungroup() %>% 
+  filter(SNP_type2 == "significant") %>%
+  dplyr::select(CHR, BP, Phenotype, logP, SNP_type, SNP_type2) %>% rename(Bonferroni_significance=SNP_type, FDR_significance=SNP_type2) %>%
+  write_delim(paste0("Significant_GEMMA_", condition[5], "_temperaturesphenlogp_fdr0.1_v1.tsv"), delim = "\t", col_names = T)
+
+
+```
+
+### GWAS plot zoom to observe the genes present in a particular genomic region for 18ºC Condition GWAS results
+
+First, I will just reduce the data frames so it is more easy to manage them. I did by making the -log(P) bigger than 2 and only keeping the information from chromosomes smaller and equal than 13.
+
+The table `genestable2` contains all the genes that share the location of significant SNPs for a particular phenotype. It is the same for `testable2` which contains all the transposable elements (TEs) that share the location of significant SNPs for a particular phenotype.
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+qvalsign0.1res  %>%
+  ungroup() %>%
+  filter(CHR <= 13) %>% filter(logP > 2) %>%
+  write_delim("resultsgemsmaller_18C_temperaturefdr0.1_v1.tsv", delim = "\t", col_names = T)
+  
+
+
+#bonfthr<-read.csv("Bonferroni_thresholds_temperature_final_v2.csv") %>% dplyr::select(-X)
+
+
+resultsgemred<-read_tsv("resultsgemsmaller_18C_temperaturefdr0.1_v1.tsv")
+
+
+
+resultsgemred2<-resultsgemred %>%
+  mutate_at(c("SNP_type2"), ~replace_na(.,"Other")) %>% dplyr::select (-Bonferroni_threshold,-n, -Count) %>% full_join(Bonferroni_thresholds) 
+
+```
+
+```{r eval=FALSE, warning=FALSE, message=FALSE, error=FALSE}
+
+
+resultsgemredall<-resultsgemred2%>% drop_na(CHR)
+
+
+
+```
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+
+plot_gff <- function(gff_name, chromosome, min_coord, max_coord) {
+  gff = read_tsv(gff_name, 
+               col_names = c("CHR", "X1", "type", "Start", "Stop", "X2", "X3", "X4", "Annot"))  %>%
+  separate(col = Annot, into = c("ID", "Parent", "Name"), sep = ";") %>%
+  mutate(ID = str_remove(ID, "ID=")) %>%
+  filter(CHR == chromosome) %>%
+  filter(Start >= min_coord) %>%
+  filter(Stop <= max_coord) %>%
+  mutate(y_value = rank(Start)) %>%
+  arrange(Start)
+
+  
+## If too many genes, organize them
+  if (nrow(gff) > 5) {
+    temp = ceiling(nrow(gff)/5)
+    gff = gff %>% mutate(y_value = rep(c(1:5), temp)[1:nrow(gff)])
+  }
+
+  if (nrow(gff) > 0) {
+    
+  
+## Make plot
+  c = gff %>%
+    ggplot() +
+    geom_segment(mapping = aes(x = Start, xend = Stop, y = y_value, yend = y_value), size = 2) +
+    theme_bw() + 
+    theme(axis.title.y = element_blank(), axis.text.y = element_blank(), 
+          axis.title.x = element_blank(), axis.ticks.y = element_blank(), 
+          panel.grid.minor.y = element_blank(), panel.grid.major.y = element_blank()) +
+    coord_cartesian(xlim = c(min_coord, max_coord), ylim = c(min(gff$y_value) - 0.5, max(gff$y_value) + 0.5))
+
+
+## If there are a reasonable number of genes, 
+# I will also add their name on the plot
+  if (nrow(gff) <= 15) {
+    c = c + geom_text(aes(x = Stop + (max_coord - min_coord)*0.05 , y = y_value, label = ID), size = 2) 
+  }
+
+  c
+
+} else { 
+  print("NULL")
+  }
+
+
+}
+
+
+gene_gff = "z.tritici.IP0323.reannot_SMP_v1.gff3" #Most recent annotation, ONLY GENES
+TE_gff = "IPO323_refTEs_match.gff" # Cecile Lorrain 2021 annotation
+
+signif<- resultsgemred2 %>% filter(SNP_type2 == "significant")
+
+listofphen<-c(unique(signif$Phenotype))
+
+
+from_positions_to_loci <- function(tibble_pos, distance_threshold) {
+  chromosomes = unique(sort(tibble_pos$CHR))
+  temp2 = list()
+  for (i in chromosomes){
+    v = tibble_pos %>%
+      filter(CHR == i) %>%
+      dplyr::select(CHR, BP) %>% 
+      distinct() %>% pull(BP) %>% sort()
+    
+    # Split the vectors into group based on the length threshold
+    temp = split(v, cumsum(c(TRUE, diff(v) >= distance_threshold)))
+    
+    temp2[[i]] =  temp %>% 
+      map_df(enframe, .id = 'Locus_nb') %>% 
+      dplyr::rename(BP = value) %>%
+      dplyr::mutate(CHR = i)
+    
+  }
+  
+  bind_rows(temp2) %>%
+    dplyr::select(CHR, Locus_nb, BP) %>%
+    arrange(CHR, Locus_nb, BP)
+}
+
+#2858
+
+gff1 = read_tsv(gene_gff, 
+                col_names = c("CHR", "X1", "type", "Start", "Stop", "X2", "X3", "X4", "Annot"))  %>%
+    separate(col = Annot, into = c("ID", "Parent", "Name"), sep = ";") %>% group_by(CHR) %>% filter(type=="gene") %>% mutate(Starti=lead(Start)) %>% mutate(lala=Starti-Start) %>% na.omit()
+
+mean(gff1$lala)
+
+distance_threshold = 2800 #Distance between two significant SNPs to include them in the same region
+
+#For each phenotype, get significant loci from list of positions
+list_loci = list()
+for (j in c(1:length(unique(signif$Phenotype)))) {
+  list_loci[[j]] = from_positions_to_loci(filter(signif, Phenotype == unique(signif$Phenotype)[j]),
+                         distance_threshold) %>%
+    dplyr::mutate(Phenotype = unique(signif$Phenotype)[j])
+}
+#Adding locus info to the table
+signif = full_join(bind_rows(list_loci), signif) %>% 
+  group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::mutate(Locus_length = 1 + max(BP) - min(BP)) %>%
+  ungroup()
+
+
+
+
+plot_list = list()
+
+
+for (condi in listofphen){
+  tempred1<- resultsgemred2 %>% filter(Phenotype == condi)
+  tempred2<- resultsgemred2 %>% filter(Phenotype == condi) %>% filter(SNP_type2 == "significant") %>% ungroup()  
+  
+  chromodifloc<-unique(tempred2$CHR)
+  
+  for (CHRval in chromodifloc){
+    
+    tempred4<- resultsgemred2 %>% filter(Phenotype == condi) %>% filter(SNP_type2 == "significant") %>% filter(CHR == CHRval)
+    pheno=condi
+    chromosome = paste0("chr_", CHRval) 
+    tempred5<-left_join(tempred4, signif)
+    eachloc<-unique(tempred5$Locus_nb)
+      for (locus in eachloc){ 
+        
+        tempred6<-tempred5 %>% filter(Locus_nb == locus)
+        min_coord = (mean(tempred6$BP))-3300
+        max_coord = (mean(tempred6$BP))+3300
+
+ 
+# Prepare the gene section of the plot
+        c = plot_gff(TE_gff, chromosome, min_coord, max_coord) 
+        d = plot_gff(gene_gff, chromosome, min_coord, max_coord)
+
+        if (length(d) == 1 & length(c) == 1){
+        } else {
+# Prepare the GWAS section of the plot for the first phenotype
+          
+          gff1 = read_tsv(gene_gff, 
+               col_names = c("CHR", "X1", "type", "Start", "Stop", "X2", "X3", "X4", "Annot"))  %>%
+                separate(col = Annot, into = c("ID", "Parent", "Name"), sep = ";") %>%
+                mutate(ID = str_remove(ID, "ID=")) %>% 
+                filter(type == "gene") %>%
+                filter(CHR == chromosome) %>%
+                filter(Start >= min_coord) %>%
+                filter(Stop <= max_coord) %>%
+                mutate(y_value = rank(Start))
+          
+            genestable=tibble(gene=gff1$ID, CHR = gff1$CHR, Start=gff1$Start, Stop=gff1$Stop, Phenotype=unique(tempred6$Phenotype))
+          
+          gff2 = read_tsv(TE_gff, 
+               col_names = c("CHR", "X1", "type", "Start", "Stop", "X2", "X3", "X4", "Annot", "a"))  %>%
+                separate(col = Annot, into = c("ID", "Parent", "Name"), sep = ";") %>%
+                mutate(ID = str_remove(ID, "ID=")) %>% 
+                filter(CHR == chromosome) %>%
+                filter(Start >= min_coord) %>%
+                filter(Stop <= max_coord) %>%
+                mutate(y_value = rank(Start))
+          
+            testable=tibble(TE=gff2$ID, CHR = gff2$CHR, Start=gff2$Start, Stop=gff2$Stop, Phenotype=unique(tempred6$Phenotype))
+    
+          if (exists("genestable2") == FALSE) {
+            genestable2=genestable
+          } else {
+            genestable2=full_join(genestable2, genestable)
+          }
+          
+          if (exists("testable2") == FALSE) {
+            testable2=testable
+          } else {
+            testable2=full_join(testable2, testable)
+          }
+            
+            
+          b = tempred1 %>%
+            filter(Phenotype == pheno) %>%
+            filter(CHR == CHRval) %>%
+            filter(BP >= min_coord) %>%
+            filter(BP <= max_coord) %>%
+            mutate(logP = -log10(P)) %>%
+            ggplot() +
+            geom_point(aes(x = BP, y = logP, col = SNP_type2)) +
+              geom_hline(aes(yintercept=-log10(Bonferroni_threshold)),
+                     linetype = "dashed", color = "grey20") +
+            theme_bw() +
+            labs(title = paste0("GWAS: ", pheno),
+               subtitle = paste0("The region is on the chromosome ", CHRval, 
+                               " from ", min_coord, "bp to ", max_coord, "bp.")) +
+            theme(axis.title.x = element_blank(),
+                panel.grid.major =  element_line(color = "grey90"),
+                axis.text = element_text(color = "grey20", size = 9))+
+            coord_cartesian(xlim = c(min_coord, max_coord))
+          
+
+          p=cowplot::plot_grid(b, c, d, ncol = 1, align = 'v', axis = 'lr', rel_heights = c(1, 0.3, 0.3))
+
+          plot_list[[paste0("_",condi, "_", CHRval, "_", locus)]] = p
+          
+        }
+      }
+  }
+}
+
+
+ 
+
+
+
+  
+```
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+pdf(file="genesforallMPtemperaturegenesandtes_fdr0.1_18C_v1.pdf")
+
+for (plot in c(1:(length(plot_list)))){
+    print(plot_list[[plot]])
+    }
+dev.off()
+
+
+
+
+for (i in names(plot_list)){
+    
+    newdat=tibble(Phenotype=print(i), num=1)
+    if (i == names(plot_list)[[1]]) { 
+      newdat2 = newdat 
+    }
+    else { 
+      newdat2 = bind_rows(newdat2, newdat)
+    }
+    
+}
+
+
+
+
+lendenmannannot<-read.csv("QTLLendenmannpapers_SMP_01062023.csv", header=TRUE, sep= ",") %>% rename(chromosome=Chromosome)
+annotationspred<-read.csv("annotationsgenefromnewgff3.csv", header=TRUE, sep= ",")
+total<-inner_join(annotationspred, genestable2)%>%
+  mutate(chromosome = str_remove(chromosome, "chr_")) 
+total$chromosome<-as.numeric((total$chromosome))
+
+
+
+
+totalsub<-total[,-13:-57]
+write_csv(totalsub, "totalsub_genes_GWAS_18C_v1.csv")
+
+
+anti_join(genestable2, totalsub)
+totalsub2<-totalsub %>%
+  filter(duplicated(gene))
+
+repetedgenes<-unique(totalsub2$gene)
+
+totalsub %>% filter(gene %in% repetedgenes)
+
+
+
+chromis<-unique(totalsub$chromosome)
+phenops<-unique(totalsub$Phenotype)
+for (chrm in chromis){
+  for (ph in phenops){
+    totalsubtem=totalsub %>% filter(chromosome == chrm) %>% filter(Phenotype == ph) %>% group_by(chromosome, Phenotype)
+    lendtemp=lendenmannannot %>% filter(chromosome == chrm) 
+    tempi=full_join(totalsubtem, lendtemp) %>% mutate(lendfound= ifelse(BP_est_pos >= start & BP_est_pos <= end, "yes", "no:("))
+    tempi$lendfound<-as.character(tempi$lendfound)
+    if (exists("tempi2") == FALSE) {
+            tempi2=tempi
+          } else {
+            tempi2=full_join(tempi2, tempi)
+          }
+    
+  }
+  
+}
+
+tempi2 %>% filter(lendfound == "yes")
+
+lendenmannannotfromalice<-read.csv("QTLfromAlicepaper_SMP_07062023.csv", header=TRUE, sep= ",")  %>% group_by(Phenotype, Size_interval) %>% dplyr::summarize(QTL_CHR=mean(QTL_CHR), QTL_start=mean(QTL_start), QTL_end=mean(QTL_end), QTL_peak=mean(QTL_peak)) %>% rename(chromosome=QTL_CHR, Phenotype2=Phenotype) %>% ungroup()
+
+signif<- signif %>% rename(chromosome=CHR)
+chromis<-unique(signif$chromosome)
+phenops<-unique(signif$Phenotype)
+for (chrm in chromis){
+  for (ph in phenops){
+    signiftem=signif %>% filter(chromosome == chrm) %>% filter(Phenotype == ph) %>% group_by(chromosome, Phenotype)
+    lendatemp=lendenmannannotfromalice %>% filter(chromosome == chrm) 
+    tempi3=full_join(signiftem, lendatemp) %>% mutate(lendafound= ifelse(BP >= QTL_start & BP <= QTL_end, "yes", "no:("))
+    tempi3$lendafound<-as.character(tempi3$lendafound)
+    if (exists("tempi4") == FALSE) {
+            tempi4=tempi3
+          } else {
+            tempi4=full_join(tempi4, tempi3)
+          }
+  }
+}
+
+tempi4 %>% filter(lendafound == "yes") 
+
+
+```
+
+### Writing .bed files for intersect & snpEff 18ºC condition
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+GWAS18Csig<-read_tsv("Significant_GEMMA_18C_temperaturesphen_fdr0.1_v1.tsv")
+
+
+significant<-GWAS18Csig
+#Function to gather positions into loci
+from_positions_to_loci <- function(tibble_pos, distance_threshold) {
+  chromosomes = unique(sort(tibble_pos$CHR))
+  temp2 = list()
+  for (i in chromosomes){
+    v = tibble_pos %>%
+      filter(CHR == i) %>%
+      dplyr::select(CHR, BP) %>% 
+      distinct() %>% pull(BP) %>% sort()
+    
+    # Split the vectors into group based on the length threshold
+    temp = split(v, cumsum(c(TRUE, diff(v) >= distance_threshold)))
+    
+    temp2[[i]] =  temp %>% 
+      map_df(enframe, .id = 'Locus_nb') %>% 
+      dplyr::rename(BP = value) %>%
+      dplyr::mutate(CHR = i)
+    
+  }
+  
+  bind_rows(temp2) %>%
+    dplyr::select(CHR, Locus_nb, BP) %>%
+    arrange(CHR, Locus_nb, BP)
+}
+
+distance_threshold = 2800 #Distance between two significant SNPs to include them in the same region
+#For each phenotype, get significant loci from list of positions
+list_loci = list()
+for (j in c(1:length(unique(significant$Phenotype)))) {
+  list_loci[[j]] = from_positions_to_loci(filter(significant, Phenotype == unique(significant$Phenotype)[j]),
+                         distance_threshold) %>%
+    dplyr::mutate(Phenotype = unique(significant$Phenotype)[j])
+}
+#Adding locus info to the table
+significant = full_join(bind_rows(list_loci), significant) %>% 
+  group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::mutate(Locus_length = 1 + max(BP) - min(BP)) %>%
+  ungroup()
+
+
+
+
+
+#Write loci as bed file
+significant %>% dplyr::group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::summarise(Start = min(BP) - 1, Stop = max(BP) + 1) %>%
+  dplyr::select(CHR, Start, Stop, Locus_nb, Phenotype) %>%
+  arrange(CHR, Start) %>%
+  write_delim(file = "Significant_temperature_18C_fdr0.1_loci.bed", delim = "\t", col_names = F)
+
+
+```
+
+```{r message=FALSE, error=FALSE, warning=FALSE, eval=FALSE}
+
+resultsgemred<-read_tsv("resultsgemsmaller_18C_temperaturefdr0.1_v1.tsv")
+
+resultsgemred%>% 
+  filter(SNP_type2 == "significant") %>%
+  ungroup() %>%
+  dplyr::select(CHR, BP, Phenotype) %>% filter(CHR <= 13) %>%
+  write_delim("Significant_GEMMA_18C_temperaturesphen_fdr0.1_nodistinct_v1.tsv", delim = "\t", col_names = T)
+
+
+GWAS18Csig<-read_tsv("Significant_GEMMA_18C_temperaturesphen_fdr0.1_nodistinct_v1.tsv")
+
+
+significant<-GWAS18Csig
+#Function to gather positions into loci
+from_positions_to_loci <- function(tibble_pos, distance_threshold) {
+  chromosomes = unique(sort(tibble_pos$CHR))
+  temp2 = list()
+  for (i in chromosomes){
+    v = tibble_pos %>%
+      filter(CHR == i) %>%
+      dplyr::select(CHR, BP) %>% 
+      distinct() %>% pull(BP) %>% sort()
+    
+    # Split the vectors into group based on the length threshold
+    temp = split(v, cumsum(c(TRUE, diff(v) >= distance_threshold)))
+    
+    temp2[[i]] =  temp %>% 
+      map_df(enframe, .id = 'Locus_nb') %>% 
+      dplyr::rename(BP = value) %>%
+      dplyr::mutate(CHR = i)
+    
+  }
+  
+  bind_rows(temp2) %>%
+    dplyr::select(CHR, Locus_nb, BP) %>%
+    arrange(CHR, Locus_nb, BP)
+}
+
+distance_threshold = 2800 #Distance between two significant SNPs to include them in the same region
+#For each phenotype, get significant loci from list of positions
+list_loci = list()
+for (j in c(1:length(unique(significant$Phenotype)))) {
+  list_loci[[j]] = from_positions_to_loci(filter(significant, Phenotype == unique(significant$Phenotype)[j]),
+                         distance_threshold) %>%
+    dplyr::mutate(Phenotype = unique(significant$Phenotype)[j])
+}
+#Adding locus info to the table
+significant = full_join(bind_rows(list_loci), significant) %>% 
+  group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::mutate(Locus_length = 1 + max(BP) - min(BP)) %>%
+  ungroup()
+
+significant%>%
+  write_delim(file = "Significant_temperature_18C_fdr0.1_nodistinct_loci.tsv", delim = "\t", col_names = F)
+
+
+
+#Write loci as bed file
+significant %>% dplyr::group_by(CHR, Locus_nb, Phenotype) %>%
+  dplyr::summarise(Start = min(BP) - 1, Stop = max(BP) + 1) %>%
+  dplyr::select(CHR, Start, Stop, Locus_nb, Phenotype) %>%
+  arrange(CHR, Start) %>%
+  write_delim(file = "Significant_temperature_18C_fdr0.1_nodistinct_loci.bed", delim = "\t", col_names = F)
+
+
+
+```
+
+# References
