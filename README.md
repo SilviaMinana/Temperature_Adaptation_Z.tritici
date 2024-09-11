@@ -1,7 +1,7 @@
 # Temperature_Adaptation_Z.tritici
 
 These are the scripts that I have written to study the thermal adaptation of *Zymoseptoria tritici* worldwide collection using around 400 strains. The paper has been submitted. I will update this readme once I have the link to the publication.
-Many of my scripts were modified from previously existing scripts done by Alice Feurtey https://github.com/afeurtey/WW_PopGen . 
+Some of my scripts were modified from previously existing scripts done by Alice Feurtey https://github.com/afeurtey/WW_PopGen . 
 
 ## GWAS
 
