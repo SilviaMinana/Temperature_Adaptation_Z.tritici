@@ -25,4 +25,4 @@ These are the bash scripts that describe the software, filters and options that 
 --- 
 ### Disclaimer
 
-My .Rmd files were used in a R Projects, therefore, make sure to make appropiate changes to your own preference and working directory. Some issues might arise depending of system or software versions used, therefore, I cannot promise these scripts can be used directly as they are without a few tweaks. I annotated the scripts and I hope they are clear enough, however, there might be a few missmatches between the comments and the code here and there.  
+My .Rmd files were in R Projects, which explains why there might not be a lot of paths to files in my scripts. Some issues might arise depending of system or software versions used, therefore, I cannot promise these scripts can be used directly as they are without a few tweaks. I annotated the scripts and I hope they are clear enough, however, there might be a few missmatches between the comments and the code here and there.  
